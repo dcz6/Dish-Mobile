@@ -1,0 +1,165 @@
+Build a mobile first web app MVP for a single user that:
+•	Lets the user snap photos of dishes and restaurant receipts.
+•	Uses a low cost LLM to extract itemized dish data from receipts.
+•	Links dish photos to specific receipt line items.
+•	Captures dish level ratings.
+•	Provides light data visualization and a great flow for me as the only user.
+No social/feed components are needed for this version.
+Stack & architecture
+•	Frontend:
+•	Mobile first, responsive web app.
+•	Use React (or another modern JS framework if you prefer).
+•	Optimize for “open → camera immediately”.
+•	Backend:
+•	Node + Express or Python + FastAPI; choose one and keep it minimal.
+•	Assume a single user for now (no auth system needed).
+•	Data:
+•	Will provision a database later
+LLM for receipt extraction
+•	Use a low cost LLM (e.g., OpenAI GPT 4o mini or equivalent) to parse receipt images into structured JSON.
+•	The extracted structure should include:
+•	Restaurant name
+•	Restaurant address (if available)
+•	Date and time
+•	Receipt total
+•	Line items:
+•	Dish name (string)
+•	Dish price (numeric; best effort, null if unclear)
+•	Implement a backend endpoint, e.g. POST /api/parse-receipt, that:
+1.	Accepts an uploaded image (receipt).
+2.	Sends it to the LLM with a prompt that requests strict JSON output.
+3.	Validates and returns the structured receipt data.
+•	Provide basic error handling and a simple manual correction UI so I can fix dish names/prices when parsing is wrong.
+Data model (single user)
+Implement at least:
+•	Restaurant:
+•	id
+•	name
+•	address (optional)
+•	Receipt:
+•	id
+•	restaurant_id
+•	datetime
+•	total_amount
+•	raw_llm_output (JSON for debugging)
+•	Dish:
+•	id
+•	restaurant_id
+•	name
+•	DishInstance (dish on a specific visit):
+•	id
+•	dish_id
+•	receipt_id
+•	price
+•	rating (enum/string: "Elite" | "Would order again" | "Should try once" | "Not for me")
+•	DishPhoto:
+•	id
+•	dish_instance_id (nullable until linked)
+•	image_url / storage path
+•	created_at
+There is no User table required for now; assume everything belongs to a single developer user.
+Mobile capture flow (core UX)
+The UX should feel good enough that I could realistically use it at every restaurant visit.
+1.	Launch → camera
+•	On mobile, when I open the app:
+•	Show a “Capture” screen with the camera active by default.
+•	Provide two prominent buttons/toggles:
+•	“Dish Photo”
+•	“Receipt Photo”
+•	Default mode: Dish Photo.
+2.	Dish photo capture
+•	In “Dish Photo” mode:
+•	Allow me to take a photo of a dish.
+•	After capture:
+•	Save the photo (local or cloud storage; any simple approach is fine).
+•	Create a DishPhoto record with a null dish_instance_id.
+•	Let me:
+•	Either “Attach to an existing visit” (choose from a list of recent receipts), or
+•	“Save to link later” (if I haven’t captured the receipt yet).
+•	For the MVP, assume one dish per photo.
+3.	Receipt capture & parsing
+•	In “Receipt Photo” mode:
+•	Allow me to take a photo of the restaurant receipt.
+•	Call POST /api/parse-receipt to get structured data from the LLM.
+•	Show a review screen:
+•	Restaurant name
+•	Date/time
+•	Total, tax, tip
+•	Line items with dish names and prices in editable fields.
+•	Let me:
+•	Correct dish names and prices.
+•	Confirm and save.
+•	After save, create:
+•	Restaurant (if new) and Receipt.
+•	Dish records (creating or reusing by restaurant + dish name).
+•	DishInstance records for each line item with the parsed/edited price.
+4.	Linking photos ↔ line items
+•	Immediately after saving a new receipt, prompt:
+•	“Link your dish photos to this visit.”
+•	Show:
+•	The DishInstance list for this receipt (dish name + price).
+•	All recent unlinked DishPhoto entries (e.g., last 24h) with thumbnails.
+•	Interaction pattern:
+•	Tap a dish instance → choose one photo to attach.
+•	Or tap a photo → choose a dish instance.
+•	Once linked, update DishPhoto.dish_instance_id.
+5.	Rating each dish
+•	After a photo is linked to a DishInstance, show a rating bar:
+•	4 buttons: "Elite", "Would order again", "Should try once", "Not for me".
+•	Store the rating in DishInstance.rating.
+•	Make this rating step prominent but low friction (e.g., immediately visible under the photo with one tap).
+Views focused on my experience
+1. Capture screen (default)
+•	Camera view with:
+•	Mode toggle (Dish / Receipt).
+•	Simple, thumb friendly controls.
+•	Make this the default route since I’ll use it most.
+2. My Dishes
+•	Display an Instagram style grid of my dish photos:
+•	Each tile shows the dish photo.
+•	A small badge or color to indicate rating (Elite / Would order again / Should try once / Not for me).
+•	Include a toggle to sort:
+•	By most recent.
+•	By rating (order: Elite → Would order again → Should try once → Not for me → unrated).
+•	On tapping a tile, show a detail view with:
+•	Dish name.
+•	Restaurant name.
+•	Visit date/time.
+•	Price.
+•	Rating (editable).
+3. Receipts / Visits
+•	A simple list of receipts:
+•	Restaurant name.
+•	Date/time.
+•	Total amount.
+•	Tapping a receipt shows:
+•	Line items (dish instances) with name, price, rating, and any linked photos (thumbnails).
+•	Ability to link any remaining unlinked photos to a dish instance from here.
+4. Stats / Data visualization (for me)
+•	A lightweight stats page to help validate data quality and usefulness:
+•	Number of dishes recorded.
+•	Count of dishes by rating category (bar chart or list).
+•	Total spend captured across all receipts.
+•	Number of distinct restaurants visited.
+•	Simple time breakdown (e.g., dishes per month).
+•	Use a basic chart library or simple styled lists; prioritize clarity over design.
+Developer friendly aspects
+•	Keep the codebase small and understandable; this is for me to iterate on:
+•	Separate modules for:
+•	Receipt parsing (LLM client + prompt).
+•	Persistence (DB models).
+•	Linking logic (photos ↔ dish instances).
+•	Add short, clear comments where logic is non obvious.
+•	Make it easy to:
+•	Swap the LLM provider or model.
+•	Replace the image storage implementation.
+•	Later add user accounts and social features, but don’t add them now.
+Non goals for this MVP
+•	No social feed or other users.
+•	No recommendation engine or taste profiling.
+•	No external restaurant search APIs.
+•	No complex auth; treat it as a personal tool/prototype for now.
+The main success criteria:
+•	The capture → parse → correct → link → rate flow is fast and intuitive.
+•	The “My Dishes” grid and stats make it satisfying for me to keep using the app to log visits.
+
