@@ -1,6 +1,7 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Upload, Camera, X, Check, RotateCcw } from "lucide-react";
+import { Upload, Camera, X, Check, RotateCcw, AlertCircle } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
 interface PhotoUploadProps {
   onCapture: (imageData: string) => void;
@@ -9,14 +10,37 @@ interface PhotoUploadProps {
 }
 
 export function PhotoUpload({ onCapture, onCancel, mode }: PhotoUploadProps) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [permissionError, setPermissionError] = useState<string | null>(null);
+  const { toast } = useToast();
+
+  const checkCameraPermission = useCallback(async (): Promise<boolean> => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      return true;
+    }
+
+    try {
+      if (navigator.permissions) {
+        const result = await navigator.permissions.query({ name: "camera" as PermissionName });
+        if (result.state === "denied") {
+          setPermissionError("Camera access was denied. Please enable camera permissions in your browser or device settings.");
+          return false;
+        }
+      }
+      return true;
+    } catch {
+      return true;
+    }
+  }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    setPermissionError(null);
     setIsLoading(true);
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -26,12 +50,29 @@ export function PhotoUpload({ onCapture, onCancel, mode }: PhotoUploadProps) {
     };
     reader.onerror = () => {
       setIsLoading(false);
+      toast({
+        title: "Error",
+        description: "Failed to read the image file. Please try again.",
+        variant: "destructive",
+      });
     };
     reader.readAsDataURL(file);
   };
 
-  const handleCapture = () => {
-    fileInputRef.current?.click();
+  const handleCameraCapture = async () => {
+    setPermissionError(null);
+    
+    const hasPermission = await checkCameraPermission();
+    if (!hasPermission) {
+      return;
+    }
+    
+    cameraInputRef.current?.click();
+  };
+
+  const handleGalleryUpload = () => {
+    setPermissionError(null);
+    galleryInputRef.current?.click();
   };
 
   const handleConfirm = () => {
@@ -43,13 +84,18 @@ export function PhotoUpload({ onCapture, onCancel, mode }: PhotoUploadProps) {
 
   const handleRetake = () => {
     setPreview(null);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
+    setPermissionError(null);
+    if (cameraInputRef.current) {
+      cameraInputRef.current.value = "";
+    }
+    if (galleryInputRef.current) {
+      galleryInputRef.current.value = "";
     }
   };
 
   const handleCancel = () => {
     setPreview(null);
+    setPermissionError(null);
     onCancel?.();
   };
 
@@ -91,13 +137,21 @@ export function PhotoUpload({ onCapture, onCancel, mode }: PhotoUploadProps) {
   return (
     <div className="flex flex-col items-center justify-center h-full gap-6 p-6">
       <input
-        ref={fileInputRef}
+        ref={cameraInputRef}
         type="file"
         accept="image/*"
         capture="environment"
         onChange={handleFileChange}
         className="hidden"
-        data-testid="input-file"
+        data-testid="input-camera"
+      />
+      <input
+        ref={galleryInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleFileChange}
+        className="hidden"
+        data-testid="input-gallery"
       />
       
       <div className="text-center mb-4">
@@ -111,11 +165,21 @@ export function PhotoUpload({ onCapture, onCancel, mode }: PhotoUploadProps) {
         </p>
       </div>
 
+      {permissionError && (
+        <div className="flex items-start gap-3 p-4 bg-destructive/10 border border-destructive/20 rounded-lg max-w-xs text-sm">
+          <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-destructive font-medium mb-1">Camera Access Required</p>
+            <p className="text-muted-foreground">{permissionError}</p>
+          </div>
+        </div>
+      )}
+
       <Button
         size="lg"
-        onClick={handleCapture}
+        onClick={handleCameraCapture}
         disabled={isLoading}
-        data-testid="button-capture-upload"
+        data-testid="button-open-camera"
         className="rounded-full h-24 w-24 relative"
       >
         {isLoading ? (
@@ -126,10 +190,10 @@ export function PhotoUpload({ onCapture, onCancel, mode }: PhotoUploadProps) {
       </Button>
       
       <p className="text-muted-foreground text-center text-sm">
-        Tap to take a photo
+        Tap to open camera
       </p>
 
-      <div className="flex items-center gap-2 text-muted-foreground text-sm mt-4">
+      <div className="flex items-center gap-2 text-muted-foreground text-sm mt-4 w-full max-w-xs">
         <div className="h-px flex-1 bg-border" />
         <span>or</span>
         <div className="h-px flex-1 bg-border" />
@@ -137,12 +201,13 @@ export function PhotoUpload({ onCapture, onCancel, mode }: PhotoUploadProps) {
 
       <Button
         variant="outline"
-        onClick={handleCapture}
-        data-testid="button-upload-file"
+        onClick={handleGalleryUpload}
+        disabled={isLoading}
+        data-testid="button-upload-gallery"
         className="gap-2"
       >
         <Upload className="w-4 h-4" />
-        Upload from gallery
+        Choose from gallery
       </Button>
 
       {onCancel && (
