@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { PhotoUpload } from "@/components/PhotoUpload";
@@ -37,6 +37,8 @@ export default function Capture() {
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [receiptQueue, setReceiptQueue] = useState<string[]>([]);
   const [currentReceiptIndex, setCurrentReceiptIndex] = useState(0);
+  const preParsedReceipts = useRef<Map<number, ParsedReceipt>>(new Map());
+  const parsingInProgress = useRef<Set<number>>(new Set());
 
   const { data: unlinkedPhotos = [] } = useQuery<DishPhoto[]>({
     queryKey: ["/api/dish-photos/unlinked"],
@@ -120,9 +122,41 @@ export default function Capture() {
     },
   });
 
+  const parseReceiptInBackground = async (index: number, imageData: string) => {
+    if (parsingInProgress.current.has(index) || preParsedReceipts.current.has(index)) {
+      return;
+    }
+    parsingInProgress.current.add(index);
+    try {
+      const res = await apiRequest("POST", "/api/parse-receipt", { image: imageData });
+      const data = await res.json() as ParsedReceipt;
+      preParsedReceipts.current.set(index, data);
+    } catch {
+      preParsedReceipts.current.set(index, {
+        restaurantName: "",
+        datetime: new Date().toISOString(),
+        total: null,
+        lineItems: [],
+      });
+    } finally {
+      parsingInProgress.current.delete(index);
+    }
+  };
+
+  useEffect(() => {
+    if (step === "review" || step === "linking" || step === "rating") {
+      const nextIndex = currentReceiptIndex + 1;
+      if (nextIndex < receiptQueue.length && !preParsedReceipts.current.has(nextIndex)) {
+        parseReceiptInBackground(nextIndex, receiptQueue[nextIndex]);
+      }
+    }
+  }, [step, currentReceiptIndex, receiptQueue]);
+
   const handleCapture = (imageData: string | string[]) => {
     if (mode === "receipt") {
       const images = Array.isArray(imageData) ? imageData : [imageData];
+      preParsedReceipts.current.clear();
+      parsingInProgress.current.clear();
       setCapturedImage(images[0]);
       setReceiptQueue(images);
       setCurrentReceiptIndex(0);
@@ -139,14 +173,19 @@ export default function Capture() {
     const nextIndex = currentReceiptIndex + 1;
     if (nextIndex < receiptQueue.length) {
       setCurrentReceiptIndex(nextIndex);
-      setParsedReceipt(null);
       setSavedReceiptData(null);
       setLinkedInstanceId(null);
-      setStep("parsing");
-      parseReceiptMutation.mutate(receiptQueue[nextIndex]);
+      
+      const preParsed = preParsedReceipts.current.get(nextIndex);
+      if (preParsed) {
+        setParsedReceipt(preParsed);
+        setStep("review");
+      } else {
+        setParsedReceipt(null);
+        setStep("parsing");
+        parseReceiptMutation.mutate(receiptQueue[nextIndex]);
+      }
     } else {
-      setReceiptQueue([]);
-      setCurrentReceiptIndex(0);
       handleReset();
     }
   };
@@ -192,6 +231,16 @@ export default function Capture() {
     setShowSaveOptions(false);
     setReceiptQueue([]);
     setCurrentReceiptIndex(0);
+    preParsedReceipts.current.clear();
+    parsingInProgress.current.clear();
+  };
+
+  const handleSkipToNextReceipt = () => {
+    if (receiptQueue.length > 1 && currentReceiptIndex < receiptQueue.length - 1) {
+      processNextReceipt();
+    } else {
+      handleReset();
+    }
   };
 
   const handleSaveToLinkLater = () => {
@@ -236,21 +285,36 @@ export default function Capture() {
 
   if (step === "linking" && savedReceiptData) {
     return (
-      <PhotoLinking
-        dishInstances={savedReceiptData.dishInstances}
-        unlinkedPhotos={unlinkedPhotos}
-        onLink={handleLinkPhoto}
-        onComplete={handleLinkingComplete}
-        onSkip={handleReset}
-      />
+      <div className="flex flex-col h-full">
+        {receiptQueue.length > 1 && (
+          <div className="bg-muted/50 px-4 py-2 text-center text-sm text-muted-foreground border-b">
+            Receipt {currentReceiptIndex + 1} of {receiptQueue.length}
+          </div>
+        )}
+        <div className="flex-1 overflow-auto">
+          <PhotoLinking
+            dishInstances={savedReceiptData.dishInstances}
+            unlinkedPhotos={unlinkedPhotos}
+            onLink={handleLinkPhoto}
+            onComplete={handleLinkingComplete}
+            onSkip={handleSkipToNextReceipt}
+          />
+        </div>
+      </div>
     );
   }
 
   if (step === "rating" && linkedInstanceId) {
     const linkedInstance = savedReceiptData?.dishInstances.find((di) => di.id === linkedInstanceId);
     return (
-      <div className="flex flex-col items-center justify-center h-full p-6">
-        <Card className="w-full max-w-md">
+      <div className="flex flex-col h-full">
+        {receiptQueue.length > 1 && (
+          <div className="bg-muted/50 px-4 py-2 text-center text-sm text-muted-foreground border-b">
+            Receipt {currentReceiptIndex + 1} of {receiptQueue.length}
+          </div>
+        )}
+        <div className="flex-1 flex items-center justify-center p-6">
+          <Card className="w-full max-w-md">
           <CardContent className="pt-6">
             <h2 className="text-xl font-semibold text-center mb-2">
               How was it?
@@ -263,7 +327,7 @@ export default function Capture() {
             <RatingButtons onChange={handleRatingSelect} />
             <Button
               variant="ghost"
-              onClick={handleReset}
+              onClick={handleSkipToNextReceipt}
               className="w-full mt-4"
               data-testid="button-skip-rating"
             >
@@ -271,6 +335,7 @@ export default function Capture() {
             </Button>
           </CardContent>
         </Card>
+        </div>
       </div>
     );
   }
