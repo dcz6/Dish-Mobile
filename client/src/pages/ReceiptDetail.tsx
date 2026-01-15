@@ -54,6 +54,7 @@ export default function ReceiptDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/receipts", id] });
       queryClient.invalidateQueries({ queryKey: ["/api/dish-photos/unlinked"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dish-photos"] });
       setShowLinkDialog(false);
       setLinkingInstanceId(null);
     },
