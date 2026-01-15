@@ -11,9 +11,10 @@ interface ReceiptReviewProps {
   onConfirm: (data: ParsedReceipt) => void;
   onCancel: () => void;
   isSubmitting?: boolean;
+  cancelLabel?: string;
 }
 
-export function ReceiptReview({ data, onConfirm, onCancel, isSubmitting }: ReceiptReviewProps) {
+export function ReceiptReview({ data, onConfirm, onCancel, isSubmitting, cancelLabel = "Cancel" }: ReceiptReviewProps) {
   const [receipt, setReceipt] = useState<ParsedReceipt>(data);
 
   const updateRestaurantName = (name: string) => {
@@ -165,7 +166,7 @@ export function ReceiptReview({ data, onConfirm, onCancel, isSubmitting }: Recei
             className="flex-1"
           >
             <X className="w-4 h-4 mr-2" />
-            Cancel
+            {cancelLabel}
           </Button>
           <Button
             onClick={() => onConfirm(receipt)}

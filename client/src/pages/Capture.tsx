@@ -35,6 +35,8 @@ export default function Capture() {
   const [linkedInstanceId, setLinkedInstanceId] = useState<string | null>(null);
   const [showSaveOptions, setShowSaveOptions] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [receiptQueue, setReceiptQueue] = useState<string[]>([]);
+  const [currentReceiptIndex, setCurrentReceiptIndex] = useState(0);
 
   const { data: unlinkedPhotos = [] } = useQuery<DishPhoto[]>({
     queryKey: ["/api/dish-photos/unlinked"],
@@ -121,10 +123,29 @@ export default function Capture() {
   const handleCapture = (imageData: string) => {
     setCapturedImage(imageData);
     if (mode === "receipt") {
-      setStep("parsing");
-      parseReceiptMutation.mutate(imageData);
+      setReceiptQueue((prev) => [...prev, imageData]);
+      if (step === "capture") {
+        setStep("parsing");
+        parseReceiptMutation.mutate(imageData);
+      }
     } else {
       saveDishPhotoMutation.mutate({ imageUrl: imageData });
+    }
+  };
+
+  const processNextReceipt = () => {
+    const nextIndex = currentReceiptIndex + 1;
+    if (nextIndex < receiptQueue.length) {
+      setCurrentReceiptIndex(nextIndex);
+      setParsedReceipt(null);
+      setSavedReceiptData(null);
+      setLinkedInstanceId(null);
+      setStep("parsing");
+      parseReceiptMutation.mutate(receiptQueue[nextIndex]);
+    } else {
+      setReceiptQueue([]);
+      setCurrentReceiptIndex(0);
+      handleReset();
     }
   };
 
@@ -140,7 +161,11 @@ export default function Capture() {
     if (linkedInstanceId) {
       setStep("rating");
     } else {
-      handleReset();
+      if (receiptQueue.length > 1 && currentReceiptIndex < receiptQueue.length - 1) {
+        processNextReceipt();
+      } else {
+        handleReset();
+      }
     }
   };
 
@@ -148,7 +173,11 @@ export default function Capture() {
     if (linkedInstanceId) {
       rateInstanceMutation.mutate({ instanceId: linkedInstanceId, rating });
     }
-    handleReset();
+    if (receiptQueue.length > 1 && currentReceiptIndex < receiptQueue.length - 1) {
+      processNextReceipt();
+    } else {
+      handleReset();
+    }
   };
 
   const handleReset = () => {
@@ -159,6 +188,8 @@ export default function Capture() {
     setLinkedInstanceId(null);
     setCapturedImage(null);
     setShowSaveOptions(false);
+    setReceiptQueue([]);
+    setCurrentReceiptIndex(0);
   };
 
   const handleSaveToLinkLater = () => {
@@ -171,19 +202,33 @@ export default function Capture() {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4 p-6">
         <Loader2 className="w-12 h-12 animate-spin text-primary" />
-        <p className="text-muted-foreground">Analyzing receipt...</p>
+        <p className="text-muted-foreground">
+          {receiptQueue.length > 1
+            ? `Analyzing receipt ${currentReceiptIndex + 1} of ${receiptQueue.length}...`
+            : "Analyzing receipt..."}
+        </p>
       </div>
     );
   }
 
   if (step === "review" && parsedReceipt) {
     return (
-      <ReceiptReview
-        data={parsedReceipt}
-        onConfirm={handleReceiptConfirm}
-        onCancel={handleReset}
-        isSubmitting={saveReceiptMutation.isPending}
-      />
+      <div className="flex flex-col h-full">
+        {receiptQueue.length > 1 && (
+          <div className="bg-muted/50 px-4 py-2 text-center text-sm text-muted-foreground border-b">
+            Receipt {currentReceiptIndex + 1} of {receiptQueue.length}
+          </div>
+        )}
+        <div className="flex-1 overflow-auto">
+          <ReceiptReview
+            data={parsedReceipt}
+            onConfirm={handleReceiptConfirm}
+            onCancel={receiptQueue.length > 1 ? processNextReceipt : handleReset}
+            isSubmitting={saveReceiptMutation.isPending}
+            cancelLabel={receiptQueue.length > 1 ? "Skip" : "Cancel"}
+          />
+        </div>
+      </div>
     );
   }
 
