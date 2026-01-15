@@ -2,6 +2,7 @@ import { useRef, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Upload, Camera, X, Check, RotateCcw, AlertCircle, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { motion, AnimatePresence, type PanInfo } from "framer-motion";
 
 interface PhotoUploadProps {
   onCapture: (imageData: string) => void;
@@ -155,6 +156,21 @@ export function PhotoUpload({ onCapture, onCancel, mode }: PhotoUploadProps) {
     onCancel?.();
   };
 
+  const handleSwipe = (event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+    const swipeThreshold = 50;
+    const velocityThreshold = 500;
+    
+    if (info.offset.x < -swipeThreshold || info.velocity.x < -velocityThreshold) {
+      if (currentPreviewIndex < multiPreviews.length - 1) {
+        setCurrentPreviewIndex((i) => i + 1);
+      }
+    } else if (info.offset.x > swipeThreshold || info.velocity.x > velocityThreshold) {
+      if (currentPreviewIndex > 0) {
+        setCurrentPreviewIndex((i) => i - 1);
+      }
+    }
+  };
+
   if (preview) {
     return (
       <div className="flex flex-col h-full bg-black">
@@ -193,44 +209,71 @@ export function PhotoUpload({ onCapture, onCancel, mode }: PhotoUploadProps) {
   if (multiPreviews.length > 0) {
     return (
       <div className="flex flex-col h-full bg-black">
-        <div className="flex items-center justify-between p-4 bg-black/80">
-          <span className="text-white text-sm">
-            {currentPreviewIndex + 1} of {multiPreviews.length} photos
-          </span>
+        <div className="flex items-center justify-between gap-2 p-4 bg-black/80" style={{ paddingTop: "max(1rem, env(safe-area-inset-top))" }}>
+          <div className="flex items-center gap-3">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleRemoveCurrentPreview}
+              data-testid="button-remove-photo"
+              className="text-white hover:text-destructive"
+            >
+              <Trash2 className="w-5 h-5" />
+            </Button>
+            <span className="text-white text-sm">
+              {currentPreviewIndex + 1} of {multiPreviews.length}
+            </span>
+          </div>
           <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleRemoveCurrentPreview}
-            data-testid="button-remove-photo"
-            className="text-white hover:text-destructive"
+            size="default"
+            onClick={handleMultiConfirm}
+            data-testid="button-use-all-photos"
+            className="rounded-full"
           >
-            <Trash2 className="w-5 h-5" />
+            <Check className="w-4 h-4 mr-2" />
+            Use All ({multiPreviews.length})
           </Button>
         </div>
-        <div className="flex-1 relative flex items-center justify-center p-4">
+        <div className="flex-1 relative flex items-center justify-center overflow-hidden">
           {multiPreviews.length > 1 && currentPreviewIndex > 0 && (
             <Button
               variant="ghost"
               size="icon"
               onClick={() => setCurrentPreviewIndex((i) => i - 1)}
               data-testid="button-prev-photo"
-              className="absolute left-2 text-white"
+              className="absolute left-2 text-white z-10"
             >
               <ChevronLeft className="w-8 h-8" />
             </Button>
           )}
-          <img
-            src={multiPreviews[currentPreviewIndex]}
-            alt={`Preview ${currentPreviewIndex + 1}`}
-            className="max-w-full max-h-full object-contain rounded-lg"
-          />
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={currentPreviewIndex}
+              initial={{ opacity: 0.5 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0.5 }}
+              transition={{ duration: 0.15 }}
+              drag="x"
+              dragConstraints={{ left: 0, right: 0 }}
+              dragElastic={0.2}
+              onDragEnd={handleSwipe}
+              className="flex items-center justify-center w-full h-full p-4 cursor-grab active:cursor-grabbing touch-pan-y"
+            >
+              <img
+                src={multiPreviews[currentPreviewIndex]}
+                alt={`Preview ${currentPreviewIndex + 1}`}
+                className="max-w-full max-h-full object-contain rounded-lg pointer-events-none select-none"
+                draggable={false}
+              />
+            </motion.div>
+          </AnimatePresence>
           {multiPreviews.length > 1 && currentPreviewIndex < multiPreviews.length - 1 && (
             <Button
               variant="ghost"
               size="icon"
               onClick={() => setCurrentPreviewIndex((i) => i + 1)}
               data-testid="button-next-photo"
-              className="absolute right-2 text-white"
+              className="absolute right-2 text-white z-10"
             >
               <ChevronRight className="w-8 h-8" />
             </Button>
@@ -248,25 +291,15 @@ export function PhotoUpload({ onCapture, onCancel, mode }: PhotoUploadProps) {
             />
           ))}
         </div>
-        <div className="flex items-center justify-center gap-6 p-6 pb-8 bg-black/80">
+        <div className="flex items-center justify-center p-4 pb-6">
           <Button
             variant="outline"
-            size="lg"
             onClick={handleRetake}
             data-testid="button-retake-all"
-            className="rounded-full px-8"
+            className="rounded-full"
           >
-            <RotateCcw className="w-5 h-5 mr-2" />
+            <RotateCcw className="w-4 h-4 mr-2" />
             Start Over
-          </Button>
-          <Button
-            size="lg"
-            onClick={handleMultiConfirm}
-            data-testid="button-use-all-photos"
-            className="rounded-full px-8"
-          >
-            <Check className="w-5 h-5 mr-2" />
-            Use All ({multiPreviews.length})
           </Button>
         </div>
       </div>
