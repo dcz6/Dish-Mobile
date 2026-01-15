@@ -10,7 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Loader2, UtensilsCrossed, Receipt } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
-import type { ParsedReceipt, DishPhoto, DishInstance, Dish, Receipt as ReceiptType, Rating } from "@shared/schema";
+import type { ParsedReceipt, DishPhoto, DishInstance, Dish, ReceiptWithDetails, Rating, Receipt as ReceiptType } from "@shared/schema";
 
 type CaptureMode = "dish" | "receipt";
 type CaptureStep = "capture" | "parsing" | "review" | "linking" | "rating" | "done";
@@ -41,10 +41,12 @@ export default function Capture() {
     enabled: step === "linking",
   });
 
-  const { data: recentReceipts = [] } = useQuery<ReceiptType[]>({
-    queryKey: ["/api/receipts/recent"],
+  const { data: allReceipts = [] } = useQuery<ReceiptWithDetails[]>({
+    queryKey: ["/api/receipts"],
     enabled: showSaveOptions,
   });
+
+  const recentReceipts = allReceipts.slice(0, 5);
 
   const parseReceiptMutation = useMutation({
     mutationFn: async (imageData: string) => {
@@ -269,7 +271,7 @@ export default function Capture() {
               <div>
                 <p className="text-sm font-medium mb-2">Link to recent visit:</p>
                 <div className="space-y-2 max-h-48 overflow-auto">
-                  {recentReceipts.slice(0, 5).map((receipt) => (
+                  {recentReceipts.map((receipt) => (
                     <Button
                       key={receipt.id}
                       variant="outline"
@@ -277,7 +279,7 @@ export default function Capture() {
                       onClick={() => navigate(`/receipts/${receipt.id}`)}
                       data-testid={`link-to-receipt-${receipt.id}`}
                     >
-                      {new Date(receipt.datetime).toLocaleDateString()}
+                      {receipt.restaurant.name}
                     </Button>
                   ))}
                 </div>
