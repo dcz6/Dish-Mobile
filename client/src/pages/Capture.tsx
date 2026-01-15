@@ -120,16 +120,18 @@ export default function Capture() {
     },
   });
 
-  const handleCapture = (imageData: string) => {
-    setCapturedImage(imageData);
+  const handleCapture = (imageData: string | string[]) => {
     if (mode === "receipt") {
-      setReceiptQueue((prev) => [...prev, imageData]);
-      if (step === "capture") {
-        setStep("parsing");
-        parseReceiptMutation.mutate(imageData);
-      }
+      const images = Array.isArray(imageData) ? imageData : [imageData];
+      setCapturedImage(images[0]);
+      setReceiptQueue(images);
+      setCurrentReceiptIndex(0);
+      setStep("parsing");
+      parseReceiptMutation.mutate(images[0]);
     } else {
-      saveDishPhotoMutation.mutate({ imageUrl: imageData });
+      const singleImage = Array.isArray(imageData) ? imageData[0] : imageData;
+      setCapturedImage(singleImage);
+      saveDishPhotoMutation.mutate({ imageUrl: singleImage });
     }
   };
 

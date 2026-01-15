@@ -5,7 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { motion, AnimatePresence, type PanInfo } from "framer-motion";
 
 interface PhotoUploadProps {
-  onCapture: (imageData: string) => void;
+  onCapture: (imageData: string | string[]) => void;
   onCancel?: () => void;
   mode: "dish" | "receipt";
 }
@@ -116,9 +116,7 @@ export function PhotoUpload({ onCapture, onCancel, mode }: PhotoUploadProps) {
 
   const handleMultiConfirm = () => {
     if (multiPreviews.length > 0) {
-      multiPreviews.forEach((imageData) => {
-        onCapture(imageData);
-      });
+      onCapture(multiPreviews);
       setMultiPreviews([]);
       setCurrentPreviewIndex(0);
     }
