@@ -1,6 +1,6 @@
 import { useRef, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Upload, Camera, X, Check, RotateCcw, AlertCircle } from "lucide-react";
+import { Upload, Camera, X, Check, RotateCcw, AlertCircle, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface PhotoUploadProps {
@@ -13,6 +13,8 @@ export function PhotoUpload({ onCapture, onCancel, mode }: PhotoUploadProps) {
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const [multiPreviews, setMultiPreviews] = useState<string[]>([]);
+  const [currentPreviewIndex, setCurrentPreviewIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [permissionError, setPermissionError] = useState<string | null>(null);
   const { toast } = useToast();
@@ -37,26 +39,55 @@ export function PhotoUpload({ onCapture, onCancel, mode }: PhotoUploadProps) {
   }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
     setPermissionError(null);
     setIsLoading(true);
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const imageData = event.target?.result as string;
-      setPreview(imageData);
-      setIsLoading(false);
-    };
-    reader.onerror = () => {
-      setIsLoading(false);
-      toast({
-        title: "Error",
-        description: "Failed to read the image file. Please try again.",
-        variant: "destructive",
+
+    if (files.length === 1) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const imageData = event.target?.result as string;
+        setPreview(imageData);
+        setIsLoading(false);
+      };
+      reader.onerror = () => {
+        setIsLoading(false);
+        toast({
+          title: "Error",
+          description: "Failed to read the image file. Please try again.",
+          variant: "destructive",
+        });
+      };
+      reader.readAsDataURL(files[0]);
+    } else {
+      const imagePromises = Array.from(files).map((file) => {
+        return new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            resolve(event.target?.result as string);
+          };
+          reader.onerror = () => reject(new Error("Failed to read file"));
+          reader.readAsDataURL(file);
+        });
       });
-    };
-    reader.readAsDataURL(file);
+
+      Promise.all(imagePromises)
+        .then((images) => {
+          setMultiPreviews(images);
+          setCurrentPreviewIndex(0);
+          setIsLoading(false);
+        })
+        .catch(() => {
+          setIsLoading(false);
+          toast({
+            title: "Error",
+            description: "Failed to read some image files. Please try again.",
+            variant: "destructive",
+          });
+        });
+    }
   };
 
   const handleCameraCapture = async () => {
@@ -82,8 +113,31 @@ export function PhotoUpload({ onCapture, onCancel, mode }: PhotoUploadProps) {
     }
   };
 
+  const handleMultiConfirm = () => {
+    if (multiPreviews.length > 0) {
+      multiPreviews.forEach((imageData) => {
+        onCapture(imageData);
+      });
+      setMultiPreviews([]);
+      setCurrentPreviewIndex(0);
+    }
+  };
+
+  const handleRemoveCurrentPreview = () => {
+    const newPreviews = multiPreviews.filter((_, i) => i !== currentPreviewIndex);
+    if (newPreviews.length === 0) {
+      setMultiPreviews([]);
+      setCurrentPreviewIndex(0);
+    } else {
+      setMultiPreviews(newPreviews);
+      setCurrentPreviewIndex(Math.min(currentPreviewIndex, newPreviews.length - 1));
+    }
+  };
+
   const handleRetake = () => {
     setPreview(null);
+    setMultiPreviews([]);
+    setCurrentPreviewIndex(0);
     setPermissionError(null);
     if (cameraInputRef.current) {
       cameraInputRef.current.value = "";
@@ -95,6 +149,8 @@ export function PhotoUpload({ onCapture, onCancel, mode }: PhotoUploadProps) {
 
   const handleCancel = () => {
     setPreview(null);
+    setMultiPreviews([]);
+    setCurrentPreviewIndex(0);
     setPermissionError(null);
     onCancel?.();
   };
@@ -134,6 +190,89 @@ export function PhotoUpload({ onCapture, onCancel, mode }: PhotoUploadProps) {
     );
   }
 
+  if (multiPreviews.length > 0) {
+    return (
+      <div className="flex flex-col h-full bg-black">
+        <div className="flex items-center justify-between p-4 bg-black/80">
+          <span className="text-white text-sm">
+            {currentPreviewIndex + 1} of {multiPreviews.length} photos
+          </span>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleRemoveCurrentPreview}
+            data-testid="button-remove-photo"
+            className="text-white hover:text-destructive"
+          >
+            <Trash2 className="w-5 h-5" />
+          </Button>
+        </div>
+        <div className="flex-1 relative flex items-center justify-center p-4">
+          {multiPreviews.length > 1 && currentPreviewIndex > 0 && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setCurrentPreviewIndex((i) => i - 1)}
+              data-testid="button-prev-photo"
+              className="absolute left-2 text-white"
+            >
+              <ChevronLeft className="w-8 h-8" />
+            </Button>
+          )}
+          <img
+            src={multiPreviews[currentPreviewIndex]}
+            alt={`Preview ${currentPreviewIndex + 1}`}
+            className="max-w-full max-h-full object-contain rounded-lg"
+          />
+          {multiPreviews.length > 1 && currentPreviewIndex < multiPreviews.length - 1 && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setCurrentPreviewIndex((i) => i + 1)}
+              data-testid="button-next-photo"
+              className="absolute right-2 text-white"
+            >
+              <ChevronRight className="w-8 h-8" />
+            </Button>
+          )}
+        </div>
+        <div className="flex items-center justify-center gap-2 px-4 py-2">
+          {multiPreviews.map((_, index) => (
+            <button
+              key={index}
+              onClick={() => setCurrentPreviewIndex(index)}
+              data-testid={`thumbnail-indicator-${index}`}
+              className={`w-2 h-2 rounded-full transition-colors ${
+                index === currentPreviewIndex ? "bg-white" : "bg-white/40"
+              }`}
+            />
+          ))}
+        </div>
+        <div className="flex items-center justify-center gap-6 p-6 pb-8 bg-black/80">
+          <Button
+            variant="outline"
+            size="lg"
+            onClick={handleRetake}
+            data-testid="button-retake-all"
+            className="rounded-full px-8"
+          >
+            <RotateCcw className="w-5 h-5 mr-2" />
+            Start Over
+          </Button>
+          <Button
+            size="lg"
+            onClick={handleMultiConfirm}
+            data-testid="button-use-all-photos"
+            className="rounded-full px-8"
+          >
+            <Check className="w-5 h-5 mr-2" />
+            Use All ({multiPreviews.length})
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col items-center justify-center h-full gap-6 p-6">
       <input
@@ -149,6 +288,7 @@ export function PhotoUpload({ onCapture, onCancel, mode }: PhotoUploadProps) {
         ref={galleryInputRef}
         type="file"
         accept="image/*"
+        multiple
         onChange={handleFileChange}
         className="hidden"
         data-testid="input-gallery"
