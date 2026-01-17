@@ -1,4 +1,4 @@
-import { useRef, useCallback, useState } from "react";
+import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Camera, RotateCcw, Check, X } from "lucide-react";
 
@@ -8,14 +8,14 @@ interface CameraCaptureProps {
 }
 
 export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const [isActive, setIsActive] = useState(false);
-  const [capturedImage, setCapturedImage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const videoRef = React.useRef<HTMLVideoElement>(null);
+  const canvasRef = React.useRef<HTMLCanvasElement>(null);
+  const streamRef = React.useRef<MediaStream | null>(null);
+  const [isActive, setIsActive] = React.useState(false);
+  const [capturedImage, setCapturedImage] = React.useState<string | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
 
-  const startCamera = useCallback(async () => {
+  const startCamera = React.useCallback(async () => {
     try {
       setError(null);
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -33,7 +33,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
     }
   }, []);
 
-  const stopCamera = useCallback(() => {
+  const stopCamera = React.useCallback(() => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
@@ -41,7 +41,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
     setIsActive(false);
   }, []);
 
-  const capturePhoto = useCallback(() => {
+  const capturePhoto = React.useCallback(() => {
     if (!videoRef.current || !canvasRef.current) return;
 
     const video = videoRef.current;
@@ -58,19 +58,19 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
     }
   }, [stopCamera]);
 
-  const retake = useCallback(() => {
+  const retake = React.useCallback(() => {
     setCapturedImage(null);
     startCamera();
   }, [startCamera]);
 
-  const confirm = useCallback(() => {
+  const confirm = React.useCallback(() => {
     if (capturedImage) {
       onCapture(capturedImage);
       setCapturedImage(null);
     }
   }, [capturedImage, onCapture]);
 
-  const handleCancel = useCallback(() => {
+  const handleCancel = React.useCallback(() => {
     stopCamera();
     setCapturedImage(null);
     onCancel?.();

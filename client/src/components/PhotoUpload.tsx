@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from "react";
+import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Upload, Camera, X, Check, RotateCcw, AlertCircle, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -11,16 +11,16 @@ interface PhotoUploadProps {
 }
 
 export function PhotoUpload({ onCapture, onCancel, mode }: PhotoUploadProps) {
-  const cameraInputRef = useRef<HTMLInputElement>(null);
-  const galleryInputRef = useRef<HTMLInputElement>(null);
-  const [preview, setPreview] = useState<string | null>(null);
-  const [multiPreviews, setMultiPreviews] = useState<string[]>([]);
-  const [currentPreviewIndex, setCurrentPreviewIndex] = useState(0);
-  const [isLoading, setIsLoading] = useState(false);
-  const [permissionError, setPermissionError] = useState<string | null>(null);
+  const cameraInputRef = React.useRef<HTMLInputElement>(null);
+  const galleryInputRef = React.useRef<HTMLInputElement>(null);
+  const [preview, setPreview] = React.useState<string | null>(null);
+  const [multiPreviews, setMultiPreviews] = React.useState<string[]>([]);
+  const [currentPreviewIndex, setCurrentPreviewIndex] = React.useState(0);
+  const [isLoading, setIsLoading] = React.useState(false);
+  const [permissionError, setPermissionError] = React.useState<string | null>(null);
   const { toast } = useToast();
 
-  const checkCameraPermission = useCallback(async (): Promise<boolean> => {
+  const checkCameraPermission = React.useCallback(async (): Promise<boolean> => {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       return true;
     }
