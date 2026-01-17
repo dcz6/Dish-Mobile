@@ -1,6 +1,6 @@
-# DishTracker
+# Dish
 
-DishTracker is a mobile-first web application for tracking restaurant dishes and receipts. It allows users to capture photos of dishes and receipts, use AI-powered receipt parsing to extract itemized data, link dish photos to specific receipt line items, and rate dishes.
+Dish is a mobile-first web application for tracking restaurant dishes and receipts. It allows users to capture photos of dishes and receipts, use AI-powered receipt parsing to extract itemized data, link dish photos to specific receipt line items, and rate dishes.
 
 ## Features
 
