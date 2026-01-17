@@ -12,10 +12,21 @@ import {
   DollarSign,
   Link as LinkIcon,
   Image,
+  Edit2,
+  Trash2,
+  MoreVertical,
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import type { ReceiptWithDetails, DishPhoto, Rating } from "@shared/schema";
 import { useState } from "react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export default function ReceiptDetail() {
   const { id } = useParams<{ id: string }>();
@@ -24,6 +35,19 @@ export default function ReceiptDetail() {
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
   const [showLinkDialog, setShowLinkDialog] = useState(false);
   const [linkingInstanceId, setLinkingInstanceId] = useState<string | null>(null);
+  const [editingReceipt, setEditingReceipt] = useState(false);
+  const [editingDishId, setEditingDishId] = useState<string | null>(null);
+
+  // Edit form states
+  const [editReceiptData, setEditReceiptData] = useState({
+    restaurantName: "",
+    datetime: "",
+    total: "",
+  });
+  const [editDishData, setEditDishData] = useState({
+    name: "",
+    price: "",
+  });
 
   const { data: receipt, isLoading } = useQuery<ReceiptWithDetails>({
     queryKey: ["/api/receipts", id],
@@ -42,7 +66,7 @@ export default function ReceiptDetail() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/receipts", id] });
-      setSelectedInstanceId(null);
+      // Don't close dialog here as it is also used for rating
     },
   });
 
@@ -60,6 +84,46 @@ export default function ReceiptDetail() {
     },
   });
 
+  const deleteReceiptMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest("DELETE", `/api/receipts/${id}`);
+    },
+    onSuccess: () => {
+      navigate("/receipts");
+    },
+  });
+
+  const updateReceiptMutation = useMutation({
+    mutationFn: async (data: any) => {
+      const res = await apiRequest("PATCH", `/api/receipts/${id}`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/receipts", id] });
+      setEditingReceipt(false);
+    },
+  });
+
+  const deleteDishMutation = useMutation({
+    mutationFn: async (instanceId: string) => {
+      await apiRequest("DELETE", `/api/dish-instances/${instanceId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/receipts", id] });
+    },
+  });
+
+  const updateDishMutation = useMutation({
+    mutationFn: async ({ instanceId, data }: { instanceId: string; data: any }) => {
+      const res = await apiRequest("PATCH", `/api/dish-instances/${instanceId}`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/receipts", id] });
+      setEditingDishId(null);
+    },
+  });
+
   const handleLinkPhoto = (photoId: string) => {
     if (linkingInstanceId) {
       linkPhotoMutation.mutate({ photoId, dishInstanceId: linkingInstanceId });
@@ -69,6 +133,45 @@ export default function ReceiptDetail() {
   const openLinkDialog = (instanceId: string) => {
     setLinkingInstanceId(instanceId);
     setShowLinkDialog(true);
+  };
+
+  const startEditReceipt = () => {
+    if (receipt) {
+      setEditReceiptData({
+        restaurantName: receipt.restaurant.name,
+        datetime: new Date(receipt.datetime).toISOString().slice(0, 16), // Format for datetime-local
+        total: receipt.totalAmount || "",
+      });
+      setEditingReceipt(true);
+    }
+  };
+
+  const saveReceipt = () => {
+    updateReceiptMutation.mutate({
+      restaurantName: editReceiptData.restaurantName,
+      datetime: new Date(editReceiptData.datetime).toISOString(),
+      total: parseFloat(editReceiptData.total) || 0,
+    });
+  };
+
+  const startEditDish = (di: any) => {
+    setEditDishData({
+      name: di.dish.name,
+      price: di.price || "",
+    });
+    setEditingDishId(di.id);
+  };
+
+  const saveDish = () => {
+    if (editingDishId) {
+      updateDishMutation.mutate({
+        instanceId: editingDishId,
+        data: {
+          dishName: editDishData.name,
+          price: parseFloat(editDishData.price) || 0,
+        },
+      });
+    }
   };
 
   if (isLoading) {
@@ -106,6 +209,30 @@ export default function ReceiptDetail() {
         <div className="flex-1 min-w-0">
           <h1 className="text-lg font-semibold truncate">{receipt.restaurant.name}</h1>
         </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon">
+              <MoreVertical className="w-5 h-5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={startEditReceipt}>
+              <Edit2 className="w-4 h-4 mr-2" />
+              Edit Receipt
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="text-destructive focus:text-destructive"
+              onClick={() => {
+                if (confirm("Are you sure you want to delete this receipt? This cannot be undone.")) {
+                  deleteReceiptMutation.mutate();
+                }
+              }}
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Delete Receipt
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       <div className="flex-1 overflow-auto pb-20">
@@ -183,14 +310,40 @@ export default function ReceiptDetail() {
                         </div>
                       )}
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setSelectedInstanceId(di.id)}
-                      data-testid={`rate-dish-${di.id}`}
-                    >
-                      Rate
-                    </Button>
+                    <div className="flex items-center">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setSelectedInstanceId(di.id)}
+                        data-testid={`rate-dish-${di.id}`}
+                      >
+                        Rate
+                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <MoreVertical className="w-4 h-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => startEditDish(di)}>
+                            <Edit2 className="w-4 h-4 mr-2" />
+                            Edit Item
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="text-destructive focus:text-destructive"
+                            onClick={() => {
+                              if (confirm("Are you sure you want to delete this item?")) {
+                                deleteDishMutation.mutate(di.id);
+                              }
+                            }}
+                          >
+                            <Trash2 className="w-4 h-4 mr-2" />
+                            Delete Item
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   </div>
                 ))
               )}
@@ -209,9 +362,90 @@ export default function ReceiptDetail() {
             onChange={(rating) => {
               if (selectedInstanceId) {
                 updateRatingMutation.mutate({ instanceId: selectedInstanceId, rating });
+                // We keep the dialog open to allow changing rating until user dismisses
+                setSelectedInstanceId(null);
               }
             }}
           />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={editingReceipt} onOpenChange={setEditingReceipt}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Receipt</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="restaurantName">Restaurant Name</Label>
+              <Input
+                id="restaurantName"
+                value={editReceiptData.restaurantName}
+                onChange={(e) => setEditReceiptData({ ...editReceiptData, restaurantName: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="datetime">Date & Time</Label>
+              <Input
+                id="datetime"
+                type="datetime-local"
+                value={editReceiptData.datetime}
+                onChange={(e) => setEditReceiptData({ ...editReceiptData, datetime: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="total">Total Amount</Label>
+              <Input
+                id="total"
+                type="number"
+                step="0.01"
+                value={editReceiptData.total}
+                onChange={(e) => setEditReceiptData({ ...editReceiptData, total: e.target.value })}
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setEditingReceipt(false)}>Cancel</Button>
+            <Button onClick={saveReceipt} disabled={updateReceiptMutation.isPending}>
+              {updateReceiptMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              Save Changes
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!editingDishId} onOpenChange={(open) => !open && setEditingDishId(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Item</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="dishName">Item Name</Label>
+              <Input
+                id="dishName"
+                value={editDishData.name}
+                onChange={(e) => setEditDishData({ ...editDishData, name: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="price">Price</Label>
+              <Input
+                id="price"
+                type="number"
+                step="0.01"
+                value={editDishData.price}
+                onChange={(e) => setEditDishData({ ...editDishData, price: e.target.value })}
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setEditingDishId(null)}>Cancel</Button>
+            <Button onClick={saveDish} disabled={updateDishMutation.isPending}>
+              {updateDishMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              Save Changes
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 

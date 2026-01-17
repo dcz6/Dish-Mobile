@@ -23,6 +23,14 @@ const parsedReceiptSchema = z.object({
 
 const updateDishInstanceSchema = z.object({
   rating: ratingEnum.optional(),
+  price: z.number().nullable().optional(),
+  dishName: z.string().optional(),
+});
+
+const updateReceiptSchema = z.object({
+  datetime: z.string().optional(),
+  total: z.number().nullable().optional(),
+  restaurantName: z.string().optional(),
 });
 
 const createDishPhotoSchema = z.object({
@@ -168,13 +176,123 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: result.error.errors[0].message });
       }
-      const updated = await storage.updateDishInstance(req.params.id, { rating: result.data.rating });
+
+      const id = req.params.id;
+      const currentInstance = await storage.getDishInstance(id);
+      if (!currentInstance) {
+        return res.status(404).json({ error: "Dish instance not found" });
+      }
+
+      let updates: any = {};
+      if (result.data.rating !== undefined) updates.rating = result.data.rating;
+      if (result.data.price !== undefined) updates.price = result.data.price?.toString() || null;
+
+      if (result.data.dishName) {
+        // Handle dish name change
+        const receipt = await storage.getReceipt(currentInstance.receiptId);
+        if (receipt) {
+          let dish = await storage.getDishByRestaurantAndName(receipt.restaurantId, result.data.dishName);
+          if (!dish) {
+            dish = await storage.createDish({
+              restaurantId: receipt.restaurantId,
+              name: result.data.dishName,
+            });
+          }
+          updates.dishId = dish.id;
+        }
+      }
+
+      const updated = await storage.updateDishInstance(id, updates);
       if (!updated) {
         return res.status(404).json({ error: "Dish instance not found" });
       }
+
+      // Fetch the updated instance with dish details
+      const dish = await storage.getDish(updated.dishId);
+      res.json({ ...updated, dish });
+    } catch (error) {
+      console.error("Update dish instance error:", error);
+      res.status(500).json({ error: "Failed to update dish instance" });
+    }
+  });
+
+  app.delete("/api/dish-instances/:id", async (req, res) => {
+    try {
+      const success = await storage.deleteDishInstance(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Dish instance not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete dish instance" });
+    }
+  });
+
+  app.patch("/api/receipts/:id", async (req, res) => {
+    try {
+      const result = updateReceiptSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: result.error.errors[0].message });
+      }
+
+      const id = req.params.id;
+      const currentReceipt = await storage.getReceipt(id);
+      if (!currentReceipt) {
+        return res.status(404).json({ error: "Receipt not found" });
+      }
+
+      let updates: any = {};
+      if (result.data.datetime) updates.datetime = new Date(result.data.datetime);
+      if (result.data.total !== undefined) updates.totalAmount = result.data.total?.toString() || null;
+
+      if (result.data.restaurantName) {
+        let restaurant = await storage.getRestaurantByName(result.data.restaurantName);
+        if (!restaurant) {
+          restaurant = await storage.createRestaurant({
+            name: result.data.restaurantName,
+            address: null,
+          });
+        }
+
+        if (restaurant.id !== currentReceipt.restaurantId) {
+          updates.restaurantId = restaurant.id;
+
+          // Migrate dish instances to the new restaurant
+          const dishInstances = await storage.getDishInstancesByReceipt(id);
+          for (const instance of dishInstances) {
+            const currentDish = instance.dish; // storage.getDishInstancesByReceipt returns details
+
+            // Find or create dish in the new restaurant with the same name
+            let newDish = await storage.getDishByRestaurantAndName(restaurant.id, currentDish.name);
+            if (!newDish) {
+              newDish = await storage.createDish({
+                restaurantId: restaurant.id,
+                name: currentDish.name,
+              });
+            }
+
+            await storage.updateDishInstance(instance.id, { dishId: newDish.id });
+          }
+        }
+      }
+
+      const updated = await storage.updateReceipt(id, updates);
       res.json(updated);
     } catch (error) {
-      res.status(500).json({ error: "Failed to update dish instance" });
+      console.error("Update receipt error:", error);
+      res.status(500).json({ error: "Failed to update receipt" });
+    }
+  });
+
+  app.delete("/api/receipts/:id", async (req, res) => {
+    try {
+      const success = await storage.deleteReceipt(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Receipt not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete receipt" });
     }
   });
 
