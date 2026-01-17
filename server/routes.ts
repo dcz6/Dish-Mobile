@@ -301,8 +301,10 @@ export async function registerRoutes(
       }, 0);
 
       const monthlyDishes: Record<string, number> = {};
+      const receiptsMap = new Map(receipts.map((r) => [r.id, r]));
+
       dishInstances.forEach((di) => {
-        const receipt = receipts.find((r) => r.id === di.receiptId);
+        const receipt = receiptsMap.get(di.receiptId);
         if (receipt) {
           const month = new Date(receipt.datetime).toLocaleDateString("en-US", {
             month: "short",
