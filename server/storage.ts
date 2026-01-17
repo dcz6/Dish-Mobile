@@ -39,7 +39,11 @@ export interface IStorage {
   createDishInstance(instance: InsertDishInstance): Promise<DishInstance>;
   createDishInstances(instances: InsertDishInstance[]): Promise<DishInstance[]>;
   updateDishInstance(id: string, updates: Partial<DishInstance>): Promise<DishInstance | undefined>;
+  deleteDishInstance(id: string): Promise<boolean>;
   getAllDishInstances(): Promise<DishInstance[]>;
+
+  updateReceipt(id: string, updates: Partial<Receipt>): Promise<Receipt | undefined>;
+  deleteReceipt(id: string): Promise<boolean>;
 
   getDishPhoto(id: string): Promise<DishPhoto | undefined>;
   getAllDishPhotos(): Promise<DishPhoto[]>;
@@ -144,6 +148,28 @@ export class MemStorage implements IStorage {
     return newReceipt;
   }
 
+  async updateReceipt(id: string, updates: Partial<Receipt>): Promise<Receipt | undefined> {
+    const existing = this.receipts.get(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, ...updates };
+    this.receipts.set(id, updated);
+    return updated;
+  }
+
+  async deleteReceipt(id: string): Promise<boolean> {
+    const exists = this.receipts.has(id);
+    if (!exists) return false;
+
+    // Delete associated dish instances
+    const instances = await this.getDishInstancesByReceipt(id);
+    for (const instance of instances) {
+      await this.deleteDishInstance(instance.id);
+    }
+
+    this.receipts.delete(id);
+    return true;
+  }
+
   async getDish(id: string): Promise<Dish | undefined> {
     return this.dishes.get(id);
   }
@@ -217,6 +243,22 @@ export class MemStorage implements IStorage {
     const updated = { ...existing, ...updates };
     this.dishInstances.set(id, updated);
     return updated;
+  }
+
+  async deleteDishInstance(id: string): Promise<boolean> {
+    const exists = this.dishInstances.has(id);
+    if (!exists) return false;
+
+    // Unlink photos
+    for (const photo of this.dishPhotos.values()) {
+      if (photo.dishInstanceId === id) {
+        const updated = { ...photo, dishInstanceId: null };
+        this.dishPhotos.set(photo.id, updated);
+      }
+    }
+
+    this.dishInstances.delete(id);
+    return true;
   }
 
   async getAllDishInstances(): Promise<DishInstance[]> {
