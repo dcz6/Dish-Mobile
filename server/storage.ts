@@ -29,12 +29,15 @@ export interface IStorage {
 
   getDish(id: string): Promise<Dish | undefined>;
   getDishByRestaurantAndName(restaurantId: string, name: string): Promise<Dish | undefined>;
+  getDishesByRestaurantAndNames(restaurantId: string, names: string[]): Promise<Dish[]>;
   createDish(dish: InsertDish): Promise<Dish>;
+  createDishes(dishes: InsertDish[]): Promise<Dish[]>;
   getAllDishes(): Promise<Dish[]>;
 
   getDishInstance(id: string): Promise<DishInstance | undefined>;
   getDishInstancesByReceipt(receiptId: string): Promise<(DishInstance & { dish: Dish })[]>;
   createDishInstance(instance: InsertDishInstance): Promise<DishInstance>;
+  createDishInstances(instances: InsertDishInstance[]): Promise<DishInstance[]>;
   updateDishInstance(id: string, updates: Partial<DishInstance>): Promise<DishInstance | undefined>;
   deleteDishInstance(id: string): Promise<boolean>;
   getAllDishInstances(): Promise<DishInstance[]>;
@@ -56,6 +59,7 @@ export class MemStorage implements IStorage {
   private dishes: Map<string, Dish> = new Map();
   private dishInstances: Map<string, DishInstance> = new Map();
   private dishPhotos: Map<string, DishPhoto> = new Map();
+  private dishPhotosByInstanceId: Map<string, DishPhoto[]> = new Map();
 
   async getRestaurant(id: string): Promise<Restaurant | undefined> {
     return this.restaurants.get(id);
@@ -95,9 +99,8 @@ export class MemStorage implements IStorage {
 
     const dishInstances = await this.getDishInstancesByReceipt(id);
     const dishInstancesWithPhotos = dishInstances.map((di) => {
-      const photo = Array.from(this.dishPhotos.values()).find(
-        (p) => p.dishInstanceId === di.id
-      );
+      const photos = this.dishPhotosByInstanceId.get(di.id);
+      const photo = photos && photos.length > 0 ? photos[0] : undefined;
       return { ...di, photo };
     });
 
@@ -177,6 +180,13 @@ export class MemStorage implements IStorage {
     );
   }
 
+  async getDishesByRestaurantAndNames(restaurantId: string, names: string[]): Promise<Dish[]> {
+    const lowerNames = new Set(names.map(n => n.toLowerCase()));
+    return Array.from(this.dishes.values()).filter(
+      (d) => d.restaurantId === restaurantId && lowerNames.has(d.name.toLowerCase())
+    );
+  }
+
   async createDish(dish: InsertDish): Promise<Dish> {
     const id = randomUUID();
     const newDish: Dish = {
@@ -186,6 +196,10 @@ export class MemStorage implements IStorage {
     };
     this.dishes.set(id, newDish);
     return newDish;
+  }
+
+  async createDishes(dishes: InsertDish[]): Promise<Dish[]> {
+    return Promise.all(dishes.map(d => this.createDish(d)));
   }
 
   async getAllDishes(): Promise<Dish[]> {
@@ -217,6 +231,10 @@ export class MemStorage implements IStorage {
     };
     this.dishInstances.set(id, newInstance);
     return newInstance;
+  }
+
+  async createDishInstances(instances: InsertDishInstance[]): Promise<DishInstance[]> {
+    return Promise.all(instances.map(i => this.createDishInstance(i)));
   }
 
   async updateDishInstance(id: string, updates: Partial<DishInstance>): Promise<DishInstance | undefined> {
@@ -306,6 +324,14 @@ export class MemStorage implements IStorage {
       createdAt: new Date(),
     };
     this.dishPhotos.set(id, newPhoto);
+
+    if (newPhoto.dishInstanceId) {
+      if (!this.dishPhotosByInstanceId.has(newPhoto.dishInstanceId)) {
+        this.dishPhotosByInstanceId.set(newPhoto.dishInstanceId, []);
+      }
+      this.dishPhotosByInstanceId.get(newPhoto.dishInstanceId)!.push(newPhoto);
+    }
+
     return newPhoto;
   }
 
@@ -313,6 +339,48 @@ export class MemStorage implements IStorage {
     const existing = this.dishPhotos.get(id);
     if (!existing) return undefined;
     const updated = { ...existing, ...updates };
+
+    // Update secondary index
+    if (existing.dishInstanceId !== updated.dishInstanceId) {
+      // Remove from old index
+      if (existing.dishInstanceId) {
+        const list = this.dishPhotosByInstanceId.get(existing.dishInstanceId);
+        if (list) {
+          const index = list.findIndex((p) => p.id === id);
+          if (index !== -1) {
+            list.splice(index, 1);
+            if (list.length === 0) {
+              this.dishPhotosByInstanceId.delete(existing.dishInstanceId);
+            }
+          }
+        }
+      }
+
+      // Add to new index
+      if (updated.dishInstanceId) {
+        if (!this.dishPhotosByInstanceId.has(updated.dishInstanceId)) {
+          this.dishPhotosByInstanceId.set(updated.dishInstanceId, []);
+        }
+        const list = this.dishPhotosByInstanceId.get(updated.dishInstanceId)!;
+        list.push(updated);
+        // Maintain sort order by createdAt to match original insertion order behavior
+        list.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      }
+    } else if (updated.dishInstanceId) {
+      // If dishInstanceId is the same, just update the object in the list
+      const list = this.dishPhotosByInstanceId.get(updated.dishInstanceId);
+      if (list) {
+        const index = list.findIndex((p) => p.id === id);
+        if (index !== -1) {
+          list[index] = updated;
+        } else {
+          // Should not happen if index is consistent, but for safety:
+          list.push(updated);
+          list.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+        }
+      }
+    }
+
     this.dishPhotos.set(id, updated);
     return updated;
   }

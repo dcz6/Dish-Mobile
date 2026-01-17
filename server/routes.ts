@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { z } from "zod";
 import { storage } from "./storage";
 import { parseReceiptImage } from "./receiptParser";
-import { ratingEnum } from "@shared/schema";
+import { ratingEnum, type InsertDish } from "@shared/schema";
 import type { ParsedReceipt } from "@shared/schema";
 
 const parseReceiptBodySchema = z.object({
@@ -122,25 +122,61 @@ export async function registerRoutes(
         rawLlmOutput: data,
       });
 
-      const dishInstances = [];
-      for (const item of data.lineItems) {
-        let dish = await storage.getDishByRestaurantAndName(restaurant.id, item.dishName);
-        if (!dish) {
-          dish = await storage.createDish({
-            restaurantId: restaurant.id,
-            name: item.dishName,
-          });
-        }
+      // Optimizing to avoid N+1 queries
+      const dishNames = data.lineItems.map(item => item.dishName);
+      const existingDishes = await storage.getDishesByRestaurantAndNames(restaurant.id, dishNames);
+      const existingDishesMap = new Map(existingDishes.map(d => [d.name.toLowerCase(), d]));
 
-        const dishInstance = await storage.createDishInstance({
+      const dishesToCreate: InsertDish[] = [];
+
+      // Identify missing dishes and prepare final list order
+      for (const item of data.lineItems) {
+        let dish = existingDishesMap.get(item.dishName.toLowerCase());
+        if (!dish) {
+           // check if we already marked it for creation to avoid duplicates
+           const pendingDish = dishesToCreate.find(d => d.name.toLowerCase() === item.dishName.toLowerCase());
+           if (pendingDish) {
+             // We can't link it yet because it doesn't have an ID, but we know it will be created.
+             // We'll handle mapping after creation.
+           } else {
+             dishesToCreate.push({
+               restaurantId: restaurant.id,
+               name: item.dishName,
+             });
+           }
+        }
+      }
+
+      // Bulk create missing dishes
+      const newDishes = await storage.createDishes(dishesToCreate);
+      const newDishesMap = new Map(newDishes.map(d => [d.name.toLowerCase(), d]));
+
+      // Merge maps
+      const allDishesMap = new Map(existingDishesMap);
+      newDishesMap.forEach((val, key) => {
+        allDishesMap.set(key, val);
+      });
+
+      // Create dish instances
+      const dishInstancesToCreate = data.lineItems.map(item => {
+        const dish = allDishesMap.get(item.dishName.toLowerCase());
+        if (!dish) throw new Error(`Dish not found for ${item.dishName} after creation`);
+        return {
           dishId: dish.id,
           receiptId: receipt.id,
           price: item.price?.toString() || null,
           rating: null,
-        });
+        };
+      });
 
-        dishInstances.push({ ...dishInstance, dish });
-      }
+      const createdDishInstances = await storage.createDishInstances(dishInstancesToCreate);
+
+      // Combine for response
+      const dishInstances = createdDishInstances.map((instance, index) => {
+         const item = data.lineItems[index];
+         const dish = allDishesMap.get(item.dishName.toLowerCase())!;
+         return { ...instance, dish };
+      });
 
       res.json({ receipt, dishInstances });
     } catch (error) {
@@ -383,8 +419,10 @@ export async function registerRoutes(
       }, 0);
 
       const monthlyDishes: Record<string, number> = {};
+      const receiptsMap = new Map(receipts.map((r) => [r.id, r]));
+
       dishInstances.forEach((di) => {
-        const receipt = receipts.find((r) => r.id === di.receiptId);
+        const receipt = receiptsMap.get(di.receiptId);
         if (receipt) {
           const month = new Date(receipt.datetime).toLocaleDateString("en-US", {
             month: "short",
