@@ -112,14 +112,10 @@ export class MemStorage implements IStorage {
 
   async getAllReceiptsWithDetails(): Promise<ReceiptWithDetails[]> {
     const receipts = await this.getAllReceipts();
-    const results: ReceiptWithDetails[] = [];
-
-    for (const receipt of receipts) {
-      const details = await this.getReceiptWithDetails(receipt.id);
-      if (details) results.push(details);
-    }
-
-    return results;
+    const results = await Promise.all(
+      receipts.map((receipt) => this.getReceiptWithDetails(receipt.id))
+    );
+    return results.filter((details): details is ReceiptWithDetails => !!details);
   }
 
   async getRecentReceipts(limit = 10): Promise<Receipt[]> {
