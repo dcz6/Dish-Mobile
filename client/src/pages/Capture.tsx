@@ -249,6 +249,13 @@ export default function Capture() {
     handleReset();
   };
 
+  const handlePhotoUpload = async (imageFiles: string[], dishInstanceId?: string) => {
+    const promises = imageFiles.map((img) =>
+      saveDishPhotoMutation.mutateAsync({ imageUrl: img, dishInstanceId })
+    );
+    return Promise.all(promises);
+  };
+
   if (step === "parsing") {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4 p-6">
@@ -296,6 +303,7 @@ export default function Capture() {
             dishInstances={savedReceiptData.dishInstances}
             unlinkedPhotos={unlinkedPhotos}
             onLink={handleLinkPhoto}
+            onUpload={handlePhotoUpload}
             onComplete={handleLinkingComplete}
             onSkip={handleSkipToNextReceipt}
           />
