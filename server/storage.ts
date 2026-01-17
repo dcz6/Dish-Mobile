@@ -29,12 +29,15 @@ export interface IStorage {
 
   getDish(id: string): Promise<Dish | undefined>;
   getDishByRestaurantAndName(restaurantId: string, name: string): Promise<Dish | undefined>;
+  getDishesByRestaurantAndNames(restaurantId: string, names: string[]): Promise<Dish[]>;
   createDish(dish: InsertDish): Promise<Dish>;
+  createDishes(dishes: InsertDish[]): Promise<Dish[]>;
   getAllDishes(): Promise<Dish[]>;
 
   getDishInstance(id: string): Promise<DishInstance | undefined>;
   getDishInstancesByReceipt(receiptId: string): Promise<(DishInstance & { dish: Dish })[]>;
   createDishInstance(instance: InsertDishInstance): Promise<DishInstance>;
+  createDishInstances(instances: InsertDishInstance[]): Promise<DishInstance[]>;
   updateDishInstance(id: string, updates: Partial<DishInstance>): Promise<DishInstance | undefined>;
   getAllDishInstances(): Promise<DishInstance[]>;
 
@@ -151,6 +154,13 @@ export class MemStorage implements IStorage {
     );
   }
 
+  async getDishesByRestaurantAndNames(restaurantId: string, names: string[]): Promise<Dish[]> {
+    const lowerNames = new Set(names.map(n => n.toLowerCase()));
+    return Array.from(this.dishes.values()).filter(
+      (d) => d.restaurantId === restaurantId && lowerNames.has(d.name.toLowerCase())
+    );
+  }
+
   async createDish(dish: InsertDish): Promise<Dish> {
     const id = randomUUID();
     const newDish: Dish = {
@@ -160,6 +170,10 @@ export class MemStorage implements IStorage {
     };
     this.dishes.set(id, newDish);
     return newDish;
+  }
+
+  async createDishes(dishes: InsertDish[]): Promise<Dish[]> {
+    return Promise.all(dishes.map(d => this.createDish(d)));
   }
 
   async getAllDishes(): Promise<Dish[]> {
@@ -191,6 +205,10 @@ export class MemStorage implements IStorage {
     };
     this.dishInstances.set(id, newInstance);
     return newInstance;
+  }
+
+  async createDishInstances(instances: InsertDishInstance[]): Promise<DishInstance[]> {
+    return Promise.all(instances.map(i => this.createDishInstance(i)));
   }
 
   async updateDishInstance(id: string, updates: Partial<DishInstance>): Promise<DishInstance | undefined> {
