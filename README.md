@@ -27,7 +27,7 @@ Dish is a mobile-first web application for tracking restaurant dishes and receip
 1. Clone the repository:
    ```bash
    git clone <repository-url>
-   cd rest-express
+   cd Dish
    ```
 
 2. Install dependencies:
