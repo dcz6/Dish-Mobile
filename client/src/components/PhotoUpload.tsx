@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Upload, Camera, X, Check, RotateCcw, AlertCircle, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { motion, AnimatePresence, type PanInfo } from "framer-motion";
+import { compressImage } from "@/lib/utils";
 
 interface PhotoUploadProps {
   onCapture: (imageData: string | string[]) => void;
@@ -46,33 +47,26 @@ export function PhotoUpload({ onCapture, onCancel, mode }: PhotoUploadProps) {
     setPermissionError(null);
     setIsLoading(true);
 
+    const compressOptions = mode === "receipt"
+      ? { maxDimension: 2000, quality: 0.8 }
+      : { maxDimension: 1200, quality: 0.8 };
+
     if (files.length === 1) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const imageData = event.target?.result as string;
-        setPreview(imageData);
-        setIsLoading(false);
-      };
-      reader.onerror = () => {
-        setIsLoading(false);
-        toast({
-          title: "Error",
-          description: "Failed to read the image file. Please try again.",
-          variant: "destructive",
+      compressImage(files[0], compressOptions)
+        .then((imageData) => {
+          setPreview(imageData);
+          setIsLoading(false);
+        })
+        .catch(() => {
+          setIsLoading(false);
+          toast({
+            title: "Error",
+            description: "Failed to process the image. Please try again.",
+            variant: "destructive",
+          });
         });
-      };
-      reader.readAsDataURL(files[0]);
     } else {
-      const imagePromises = Array.from(files).map((file) => {
-        return new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = (event) => {
-            resolve(event.target?.result as string);
-          };
-          reader.onerror = () => reject(new Error("Failed to read file"));
-          reader.readAsDataURL(file);
-        });
-      });
+      const imagePromises = Array.from(files).map((file) => compressImage(file, compressOptions));
 
       Promise.all(imagePromises)
         .then((images) => {
@@ -84,7 +78,7 @@ export function PhotoUpload({ onCapture, onCancel, mode }: PhotoUploadProps) {
           setIsLoading(false);
           toast({
             title: "Error",
-            description: "Failed to read some image files. Please try again.",
+            description: "Failed to process some images. Please try again.",
             variant: "destructive",
           });
         });
