@@ -40,7 +40,6 @@
         }
       ]
     ],
-    "scheme": "dish-app",
-    "newArchEnabled": true
+    "scheme": "dish-app"
   }
 }
