@@ -11,7 +11,7 @@ interface CompressOptions {
 }
 
 export async function compressImage(file: File, options: CompressOptions = {}): Promise<string> {
-  const { maxDimension = 1200, quality = 0.8 } = options;
+  const { maxDimension = 1024, quality = 0.8 } = options;
 
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
