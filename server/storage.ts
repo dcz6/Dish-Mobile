@@ -12,7 +12,16 @@ import type {
   InsertDishPhoto,
   ReceiptWithDetails,
   DishPhotoWithDetails,
+  User,
+  InsertUser,
+  UserFollow,
+  PhotoLike,
+  DishBookmark,
+  RestaurantBookmark,
+  Share,
+  InsertShare,
 } from "@shared/schema";
+import { TEST_USER_ID } from "@shared/schema";
 
 export interface IStorage {
   getRestaurant(id: string): Promise<Restaurant | undefined>;
@@ -51,6 +60,61 @@ export interface IStorage {
   getUnlinkedDishPhotos(): Promise<DishPhoto[]>;
   createDishPhoto(photo: InsertDishPhoto): Promise<DishPhoto>;
   updateDishPhoto(id: string, updates: Partial<DishPhoto>): Promise<DishPhoto | undefined>;
+
+  // User operations
+  getUser(id: string): Promise<User | undefined>;
+  getUserByUsername(username: string): Promise<User | undefined>;
+  createUser(user: InsertUser): Promise<User>;
+  getAllUsers(): Promise<User[]>;
+
+  // Follow operations
+  followUser(followerId: string, followingId: string): Promise<UserFollow>;
+  unfollowUser(followerId: string, followingId: string): Promise<boolean>;
+  getFollowers(userId: string): Promise<UserFollow[]>;
+  getFollowing(userId: string): Promise<UserFollow[]>;
+  isFollowing(followerId: string, followingId: string): Promise<boolean>;
+  getFollowStats(userId: string): Promise<{ followerCount: number; followingCount: number }>;
+
+  // Like operations
+  likePhoto(userId: string, photoId: string): Promise<PhotoLike>;
+  unlikePhoto(userId: string, photoId: string): Promise<boolean>;
+  getPhotoLikes(photoId: string): Promise<PhotoLike[]>;
+  getUserLikes(userId: string): Promise<PhotoLike[]>;
+  isPhotoLikedByUser(photoId: string, userId: string): Promise<boolean>;
+  getPhotoLikeCount(photoId: string): Promise<number>;
+
+  // Dish bookmark operations
+  bookmarkDish(userId: string, dishId: string): Promise<DishBookmark>;
+  unbookmarkDish(userId: string, dishId: string): Promise<boolean>;
+  getUserDishBookmarks(userId: string): Promise<DishBookmark[]>;
+  isDishBookmarked(userId: string, dishId: string): Promise<boolean>;
+
+  // Restaurant bookmark operations
+  bookmarkRestaurant(userId: string, restaurantId: string): Promise<RestaurantBookmark>;
+  unbookmarkRestaurant(userId: string, restaurantId: string): Promise<boolean>;
+  getUserRestaurantBookmarks(userId: string): Promise<RestaurantBookmark[]>;
+  isRestaurantBookmarked(userId: string, restaurantId: string): Promise<boolean>;
+
+  // Share operations
+  createShare(share: InsertShare): Promise<Share>;
+  getUserInbox(userId: string, unreadOnly?: boolean): Promise<Share[]>;
+  markShareAsRead(shareId: string): Promise<Share | undefined>;
+  deleteShare(shareId: string): Promise<boolean>;
+  getShareById(id: string): Promise<Share | undefined>;
+
+  // Aggregation methods for special features
+  getRestaurantWithDishes(restaurantId: string): Promise<any>; // Will define proper type later
+  getDishPhotosWithDetails(dishId: string): Promise<DishPhotoWithDetails[]>;
+  getUserProfileStats(userId: string): Promise<{
+    photoCount: number;
+    likeCount: number;
+    followerCount: number;
+    followingCount: number;
+  }>;
+  getFeedPhotos(userId: string, limit?: number, offset?: number): Promise<DishPhotoWithDetails[]>;
+  searchUsers(query: string, limit?: number): Promise<User[]>;
+  searchDishes(query: string, limit?: number): Promise<Dish[]>;
+  searchRestaurants(query: string, limit?: number): Promise<Restaurant[]>;
 }
 
 export class MemStorage implements IStorage {
@@ -60,6 +124,35 @@ export class MemStorage implements IStorage {
   private dishInstances: Map<string, DishInstance> = new Map();
   private dishPhotos: Map<string, DishPhoto> = new Map();
   private dishPhotosByInstanceId: Map<string, DishPhoto[]> = new Map();
+
+  // Social feature storage
+  private users: Map<string, User> = new Map();
+  private userFollows: Map<string, UserFollow> = new Map();
+  private photoLikes: Map<string, PhotoLike> = new Map();
+  private dishBookmarks: Map<string, DishBookmark> = new Map();
+  private restaurantBookmarks: Map<string, RestaurantBookmark> = new Map();
+  private shares: Map<string, Share> = new Map();
+
+  // Secondary indexes for performance
+  private userFollowsByFollower: Map<string, Set<string>> = new Map();
+  private userFollowsByFollowing: Map<string, Set<string>> = new Map();
+  private photoLikesByPhoto: Map<string, Set<string>> = new Map();
+  private photoLikesByUser: Map<string, Set<string>> = new Map();
+  private dishBookmarksByUser: Map<string, Set<string>> = new Map();
+  private restaurantBookmarksByUser: Map<string, Set<string>> = new Map();
+  private sharesByRecipient: Map<string, string[]> = new Map();
+
+  constructor() {
+    // Initialize with TEST_USER_ID for development
+    const testUser: User = {
+      id: TEST_USER_ID,
+      username: "testuser",
+      displayName: "Test User",
+      avatarUrl: null,
+      createdAt: new Date(),
+    };
+    this.users.set(TEST_USER_ID, testUser);
+  }
 
   async getRestaurant(id: string): Promise<Restaurant | undefined> {
     return this.restaurants.get(id);
@@ -379,6 +472,497 @@ export class MemStorage implements IStorage {
 
     this.dishPhotos.set(id, updated);
     return updated;
+  }
+
+  // ============ USER OPERATIONS ============
+  async getUser(id: string): Promise<User | undefined> {
+    return this.users.get(id);
+  }
+
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    return Array.from(this.users.values()).find(
+      (u) => u.username.toLowerCase() === username.toLowerCase()
+    );
+  }
+
+  async createUser(user: InsertUser): Promise<User> {
+    const id = randomUUID();
+    const newUser: User = {
+      id,
+      username: user.username,
+      displayName: user.displayName ?? null,
+      avatarUrl: user.avatarUrl ?? null,
+      createdAt: new Date(),
+    };
+    this.users.set(id, newUser);
+    return newUser;
+  }
+
+  async getAllUsers(): Promise<User[]> {
+    return Array.from(this.users.values());
+  }
+
+  // ============ FOLLOW OPERATIONS ============
+  async followUser(followerId: string, followingId: string): Promise<UserFollow> {
+    // Check if already following
+    const existing = Array.from(this.userFollows.values()).find(
+      (f) => f.followerId === followerId && f.followingId === followingId
+    );
+    if (existing) return existing;
+
+    const id = randomUUID();
+    const follow: UserFollow = {
+      id,
+      followerId,
+      followingId,
+      createdAt: new Date(),
+    };
+    this.userFollows.set(id, follow);
+
+    // Update indexes
+    if (!this.userFollowsByFollower.has(followerId)) {
+      this.userFollowsByFollower.set(followerId, new Set());
+    }
+    this.userFollowsByFollower.get(followerId)!.add(id);
+
+    if (!this.userFollowsByFollowing.has(followingId)) {
+      this.userFollowsByFollowing.set(followingId, new Set());
+    }
+    this.userFollowsByFollowing.get(followingId)!.add(id);
+
+    return follow;
+  }
+
+  async unfollowUser(followerId: string, followingId: string): Promise<boolean> {
+    const follow = Array.from(this.userFollows.values()).find(
+      (f) => f.followerId === followerId && f.followingId === followingId
+    );
+    if (!follow) return false;
+
+    this.userFollows.delete(follow.id);
+
+    // Update indexes
+    this.userFollowsByFollower.get(followerId)?.delete(follow.id);
+    this.userFollowsByFollowing.get(followingId)?.delete(follow.id);
+
+    return true;
+  }
+
+  async getFollowers(userId: string): Promise<UserFollow[]> {
+    const followIds = this.userFollowsByFollowing.get(userId) || new Set();
+    return Array.from(followIds).map((id) => this.userFollows.get(id)!).filter(Boolean);
+  }
+
+  async getFollowing(userId: string): Promise<UserFollow[]> {
+    const followIds = this.userFollowsByFollower.get(userId) || new Set();
+    return Array.from(followIds).map((id) => this.userFollows.get(id)!).filter(Boolean);
+  }
+
+  async isFollowing(followerId: string, followingId: string): Promise<boolean> {
+    return Array.from(this.userFollows.values()).some(
+      (f) => f.followerId === followerId && f.followingId === followingId
+    );
+  }
+
+  async getFollowStats(userId: string): Promise<{ followerCount: number; followingCount: number }> {
+    const followerCount = this.userFollowsByFollowing.get(userId)?.size || 0;
+    const followingCount = this.userFollowsByFollower.get(userId)?.size || 0;
+    return { followerCount, followingCount };
+  }
+
+  // ============ LIKE OPERATIONS ============
+  async likePhoto(userId: string, photoId: string): Promise<PhotoLike> {
+    // Check for existing like
+    const existing = Array.from(this.photoLikes.values()).find(
+      (l) => l.userId === userId && l.dishPhotoId === photoId
+    );
+    if (existing) return existing;
+
+    const id = randomUUID();
+    const like: PhotoLike = {
+      id,
+      dishPhotoId: photoId,
+      userId,
+      createdAt: new Date(),
+    };
+    this.photoLikes.set(id, like);
+
+    // Update indexes
+    if (!this.photoLikesByPhoto.has(photoId)) {
+      this.photoLikesByPhoto.set(photoId, new Set());
+    }
+    this.photoLikesByPhoto.get(photoId)!.add(id);
+
+    if (!this.photoLikesByUser.has(userId)) {
+      this.photoLikesByUser.set(userId, new Set());
+    }
+    this.photoLikesByUser.get(userId)!.add(id);
+
+    return like;
+  }
+
+  async unlikePhoto(userId: string, photoId: string): Promise<boolean> {
+    const like = Array.from(this.photoLikes.values()).find(
+      (l) => l.userId === userId && l.dishPhotoId === photoId
+    );
+    if (!like) return false;
+
+    this.photoLikes.delete(like.id);
+    this.photoLikesByPhoto.get(photoId)?.delete(like.id);
+    this.photoLikesByUser.get(userId)?.delete(like.id);
+
+    return true;
+  }
+
+  async getPhotoLikes(photoId: string): Promise<PhotoLike[]> {
+    const likeIds = this.photoLikesByPhoto.get(photoId) || new Set();
+    return Array.from(likeIds).map((id) => this.photoLikes.get(id)!).filter(Boolean);
+  }
+
+  async getUserLikes(userId: string): Promise<PhotoLike[]> {
+    const likeIds = this.photoLikesByUser.get(userId) || new Set();
+    return Array.from(likeIds).map((id) => this.photoLikes.get(id)!).filter(Boolean);
+  }
+
+  async isPhotoLikedByUser(photoId: string, userId: string): Promise<boolean> {
+    return Array.from(this.photoLikes.values()).some(
+      (l) => l.dishPhotoId === photoId && l.userId === userId
+    );
+  }
+
+  async getPhotoLikeCount(photoId: string): Promise<number> {
+    return this.photoLikesByPhoto.get(photoId)?.size || 0;
+  }
+
+  // ============ DISH BOOKMARK OPERATIONS ============
+  async bookmarkDish(userId: string, dishId: string): Promise<DishBookmark> {
+    const existing = Array.from(this.dishBookmarks.values()).find(
+      (b) => b.userId === userId && b.dishId === dishId
+    );
+    if (existing) return existing;
+
+    const id = randomUUID();
+    const bookmark: DishBookmark = {
+      id,
+      userId,
+      dishId,
+      createdAt: new Date(),
+    };
+    this.dishBookmarks.set(id, bookmark);
+
+    if (!this.dishBookmarksByUser.has(userId)) {
+      this.dishBookmarksByUser.set(userId, new Set());
+    }
+    this.dishBookmarksByUser.get(userId)!.add(id);
+
+    return bookmark;
+  }
+
+  async unbookmarkDish(userId: string, dishId: string): Promise<boolean> {
+    const bookmark = Array.from(this.dishBookmarks.values()).find(
+      (b) => b.userId === userId && b.dishId === dishId
+    );
+    if (!bookmark) return false;
+
+    this.dishBookmarks.delete(bookmark.id);
+    this.dishBookmarksByUser.get(userId)?.delete(bookmark.id);
+
+    return true;
+  }
+
+  async getUserDishBookmarks(userId: string): Promise<DishBookmark[]> {
+    const bookmarkIds = this.dishBookmarksByUser.get(userId) || new Set();
+    return Array.from(bookmarkIds).map((id) => this.dishBookmarks.get(id)!).filter(Boolean);
+  }
+
+  async isDishBookmarked(userId: string, dishId: string): Promise<boolean> {
+    return Array.from(this.dishBookmarks.values()).some(
+      (b) => b.userId === userId && b.dishId === dishId
+    );
+  }
+
+  // ============ RESTAURANT BOOKMARK OPERATIONS ============
+  async bookmarkRestaurant(userId: string, restaurantId: string): Promise<RestaurantBookmark> {
+    const existing = Array.from(this.restaurantBookmarks.values()).find(
+      (b) => b.userId === userId && b.restaurantId === restaurantId
+    );
+    if (existing) return existing;
+
+    const id = randomUUID();
+    const bookmark: RestaurantBookmark = {
+      id,
+      userId,
+      restaurantId,
+      createdAt: new Date(),
+    };
+    this.restaurantBookmarks.set(id, bookmark);
+
+    if (!this.restaurantBookmarksByUser.has(userId)) {
+      this.restaurantBookmarksByUser.set(userId, new Set());
+    }
+    this.restaurantBookmarksByUser.get(userId)!.add(id);
+
+    return bookmark;
+  }
+
+  async unbookmarkRestaurant(userId: string, restaurantId: string): Promise<boolean> {
+    const bookmark = Array.from(this.restaurantBookmarks.values()).find(
+      (b) => b.userId === userId && b.restaurantId === restaurantId
+    );
+    if (!bookmark) return false;
+
+    this.restaurantBookmarks.delete(bookmark.id);
+    this.restaurantBookmarksByUser.get(userId)?.delete(bookmark.id);
+
+    return true;
+  }
+
+  async getUserRestaurantBookmarks(userId: string): Promise<RestaurantBookmark[]> {
+    const bookmarkIds = this.restaurantBookmarksByUser.get(userId) || new Set();
+    return Array.from(bookmarkIds).map((id) => this.restaurantBookmarks.get(id)!).filter(Boolean);
+  }
+
+  async isRestaurantBookmarked(userId: string, restaurantId: string): Promise<boolean> {
+    return Array.from(this.restaurantBookmarks.values()).some(
+      (b) => b.userId === userId && b.restaurantId === restaurantId
+    );
+  }
+
+  // ============ SHARE OPERATIONS ============
+  async createShare(share: InsertShare): Promise<Share> {
+    const id = randomUUID();
+    const newShare: Share = {
+      id,
+      senderId: share.senderId,
+      recipientId: share.recipientId,
+      shareType: share.shareType,
+      dishId: share.dishId ?? null,
+      dishInstanceId: share.dishInstanceId ?? null,
+      restaurantId: share.restaurantId ?? null,
+      sharedUserId: share.sharedUserId ?? null,
+      message: share.message ?? null,
+      readAt: null,
+      createdAt: new Date(),
+    };
+    this.shares.set(id, newShare);
+
+    if (!this.sharesByRecipient.has(share.recipientId)) {
+      this.sharesByRecipient.set(share.recipientId, []);
+    }
+    this.sharesByRecipient.get(share.recipientId)!.push(id);
+
+    return newShare;
+  }
+
+  async getUserInbox(userId: string, unreadOnly = false): Promise<Share[]> {
+    const shareIds = this.sharesByRecipient.get(userId) || [];
+    const shares = shareIds.map((id) => this.shares.get(id)!).filter(Boolean);
+
+    if (unreadOnly) {
+      return shares.filter((s) => !s.readAt);
+    }
+
+    return shares.sort((a, b) =>
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }
+
+  async markShareAsRead(shareId: string): Promise<Share | undefined> {
+    const share = this.shares.get(shareId);
+    if (!share) return undefined;
+
+    const updated = { ...share, readAt: new Date() };
+    this.shares.set(shareId, updated);
+    return updated;
+  }
+
+  async deleteShare(shareId: string): Promise<boolean> {
+    const share = this.shares.get(shareId);
+    if (!share) return false;
+
+    this.shares.delete(shareId);
+
+    const recipientShares = this.sharesByRecipient.get(share.recipientId);
+    if (recipientShares) {
+      const index = recipientShares.indexOf(shareId);
+      if (index !== -1) {
+        recipientShares.splice(index, 1);
+      }
+    }
+
+    return true;
+  }
+
+  async getShareById(id: string): Promise<Share | undefined> {
+    return this.shares.get(id);
+  }
+
+  // ============ AGGREGATION METHODS ============
+  async getRestaurantWithDishes(restaurantId: string): Promise<any> {
+    const restaurant = this.restaurants.get(restaurantId);
+    if (!restaurant) return undefined;
+
+    const allDishes = Array.from(this.dishes.values()).filter(
+      (d) => d.restaurantId === restaurantId
+    );
+
+    const dishesWithPhotos = allDishes.map((dish) => {
+      const photos = Array.from(this.dishPhotos.values()).filter(
+        (p) => p.dishId === dish.id
+      );
+
+      // Get most liked photo
+      let mostLikedPhoto: any = null;
+      let maxLikes = -1;
+
+      for (const photo of photos) {
+        const likeCount = this.photoLikesByPhoto.get(photo.id)?.size || 0;
+        if (likeCount > maxLikes || (!mostLikedPhoto && photos.length > 0)) {
+          maxLikes = likeCount;
+          mostLikedPhoto = { ...photo, likeCount };
+        }
+      }
+
+      // If no photos have likes, just use the first photo
+      if (!mostLikedPhoto && photos.length > 0) {
+        mostLikedPhoto = { ...photos[0], likeCount: 0 };
+      }
+
+      return {
+        ...dish,
+        photoCount: photos.length,
+        mostLikedPhoto,
+      };
+    });
+
+    return {
+      ...restaurant,
+      dishes: dishesWithPhotos,
+    };
+  }
+
+  async getDishPhotosWithDetails(dishId: string): Promise<DishPhotoWithDetails[]> {
+    const photos = Array.from(this.dishPhotos.values()).filter(
+      (p) => p.dishId === dishId
+    ).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    return photos.map((photo) => {
+      if (!photo.dishInstanceId) return photo;
+
+      const dishInstance = this.dishInstances.get(photo.dishInstanceId);
+      if (!dishInstance) return photo;
+
+      const dish = this.dishes.get(dishInstance.dishId);
+      if (!dish) return photo;
+
+      const receipt = this.receipts.get(dishInstance.receiptId);
+      if (!receipt) return photo;
+
+      const restaurant = this.restaurants.get(receipt.restaurantId);
+      if (!restaurant) return photo;
+
+      return {
+        ...photo,
+        dishInstance: {
+          ...dishInstance,
+          dish,
+          receipt: {
+            ...receipt,
+            restaurant,
+          },
+        },
+      };
+    });
+  }
+
+  async getUserProfileStats(userId: string): Promise<{
+    photoCount: number;
+    likeCount: number;
+    followerCount: number;
+    followingCount: number;
+  }> {
+    const photoCount = Array.from(this.dishPhotos.values()).filter(
+      (p) => p.postedByUserId === userId
+    ).length;
+
+    const likeCount = this.photoLikesByUser.get(userId)?.size || 0;
+
+    const stats = await this.getFollowStats(userId);
+
+    return {
+      photoCount,
+      likeCount,
+      ...stats,
+    };
+  }
+
+  async getFeedPhotos(userId: string, limit = 20, offset = 0): Promise<DishPhotoWithDetails[]> {
+    // Get users that this user follows
+    const following = await this.getFollowing(userId);
+    const followingIds = new Set(following.map(f => f.followingId));
+    followingIds.add(userId); // Include user's own posts
+
+    // Get all photos from followed users
+    const feedPhotos = Array.from(this.dishPhotos.values())
+      .filter((p) => p.postedByUserId && followingIds.has(p.postedByUserId))
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(offset, offset + limit);
+
+    // Enhance with details
+    return feedPhotos.map((photo) => {
+      if (!photo.dishInstanceId) return photo;
+
+      const dishInstance = this.dishInstances.get(photo.dishInstanceId);
+      if (!dishInstance) return photo;
+
+      const dish = this.dishes.get(dishInstance.dishId);
+      if (!dish) return photo;
+
+      const receipt = this.receipts.get(dishInstance.receiptId);
+      if (!receipt) return photo;
+
+      const restaurant = this.restaurants.get(receipt.restaurantId);
+      if (!restaurant) return photo;
+
+      return {
+        ...photo,
+        dishInstance: {
+          ...dishInstance,
+          dish,
+          receipt: {
+            ...receipt,
+            restaurant,
+          },
+        },
+      };
+    });
+  }
+
+  async searchUsers(query: string, limit = 20): Promise<User[]> {
+    const lowerQuery = query.toLowerCase();
+    return Array.from(this.users.values())
+      .filter((u) =>
+        u.username.toLowerCase().includes(lowerQuery) ||
+        u.displayName?.toLowerCase().includes(lowerQuery)
+      )
+      .slice(0, limit);
+  }
+
+  async searchDishes(query: string, limit = 20): Promise<Dish[]> {
+    const lowerQuery = query.toLowerCase();
+    return Array.from(this.dishes.values())
+      .filter((d) => d.name.toLowerCase().includes(lowerQuery))
+      .slice(0, limit);
+  }
+
+  async searchRestaurants(query: string, limit = 20): Promise<Restaurant[]> {
+    const lowerQuery = query.toLowerCase();
+    return Array.from(this.restaurants.values())
+      .filter((r) =>
+        r.name.toLowerCase().includes(lowerQuery) ||
+        r.address?.toLowerCase().includes(lowerQuery)
+      )
+      .slice(0, limit);
   }
 }
 

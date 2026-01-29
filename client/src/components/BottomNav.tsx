@@ -1,11 +1,13 @@
 import { useLocation, Link } from "wouter";
-import { Camera, Image, Receipt, BarChart3 } from "lucide-react";
+import { Home, Search, Camera, Mail, User } from "lucide-react";
+import { TEST_USER_ID } from "@shared/schema";
 
 const navItems = [
+  { path: "/feed", label: "Feed", icon: Home },
+  { path: "/search", label: "Search", icon: Search },
   { path: "/", label: "Capture", icon: Camera },
-  { path: "/dishes", label: "Dishes", icon: Image },
-  { path: "/receipts", label: "Receipts", icon: Receipt },
-  { path: "/stats", label: "Stats", icon: BarChart3 },
+  { path: "/inbox", label: "Inbox", icon: Mail },
+  { path: `/profile/${TEST_USER_ID}`, label: "Profile", icon: User },
 ];
 
 export function BottomNav() {

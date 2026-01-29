@@ -1,10 +1,18 @@
 import OpenAI from "openai";
 import type { ParsedReceipt } from "@shared/schema";
 
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
+// Lazy initialization - only create OpenAI client when needed
+let openai: OpenAI | null = null;
+
+function getOpenAIClient(): OpenAI {
+  if (!openai) {
+    openai = new OpenAI({
+      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY,
+      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+    });
+  }
+  return openai;
+}
 
 const RECEIPT_PARSING_PROMPT = `You are a receipt parsing assistant. Analyze the provided receipt image and extract the following information in JSON format:
 
@@ -30,7 +38,8 @@ Important guidelines:
 
 export async function parseReceiptImage(imageBase64: string): Promise<ParsedReceipt> {
   try {
-    const response = await openai.chat.completions.create({
+    const client = getOpenAIClient();
+    const response = await client.chat.completions.create({
       model: "gpt-4o-mini",
       max_completion_tokens: 2048,
       messages: [

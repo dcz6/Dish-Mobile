@@ -42,6 +42,40 @@ const updateDishPhotoSchema = z.object({
   dishInstanceId: z.string().nullable(),
 });
 
+// Social feature validation schemas
+const createUserSchema = z.object({
+  username: z.string().min(1).max(50),
+  displayName: z.string().optional(),
+  avatarUrl: z.string().url().optional(),
+});
+
+const followUserSchema = z.object({
+  followingId: z.string(),
+});
+
+const likePhotoSchema = z.object({
+  userId: z.string(),
+});
+
+const bookmarkDishSchema = z.object({
+  dishId: z.string(),
+});
+
+const bookmarkRestaurantSchema = z.object({
+  restaurantId: z.string(),
+});
+
+const createShareSchema = z.object({
+  senderId: z.string(),
+  recipientId: z.string(),
+  shareType: z.enum(["dish", "dish_instance", "restaurant", "user_profile"]),
+  dishId: z.string().optional(),
+  dishInstanceId: z.string().optional(),
+  restaurantId: z.string().optional(),
+  sharedUserId: z.string().optional(),
+  message: z.string().optional(),
+});
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -453,6 +487,416 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Stats error:", error);
       res.status(500).json({ error: "Failed to fetch stats" });
+    }
+  });
+
+  // ========== USER ROUTES ==========
+  app.get("/api/users", async (req, res) => {
+    try {
+      const users = await storage.getAllUsers();
+      res.json(users);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch users" });
+    }
+  });
+
+  app.get("/api/users/:id", async (req, res) => {
+    try {
+      const user = await storage.getUser(req.params.id);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.json(user);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch user" });
+    }
+  });
+
+  app.post("/api/users", async (req, res) => {
+    try {
+      const result = createUserSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: result.error.errors[0].message });
+      }
+
+      const existing = await storage.getUserByUsername(result.data.username);
+      if (existing) {
+        return res.status(409).json({ error: "Username already taken" });
+      }
+
+      const user = await storage.createUser(result.data);
+      res.json(user);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create user" });
+    }
+  });
+
+  // ========== FOLLOW ROUTES ==========
+  app.post("/api/users/:userId/follow", async (req, res) => {
+    try {
+      const result = followUserSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: result.error.errors[0].message });
+      }
+
+      const followerId = req.params.userId;
+      const followingId = result.data.followingId;
+
+      if (followerId === followingId) {
+        return res.status(400).json({ error: "Cannot follow yourself" });
+      }
+
+      const follow = await storage.followUser(followerId, followingId);
+      res.json(follow);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to follow user" });
+    }
+  });
+
+  app.delete("/api/users/:userId/follow/:followingId", async (req, res) => {
+    try {
+      const success = await storage.unfollowUser(req.params.userId, req.params.followingId);
+      if (!success) {
+        return res.status(404).json({ error: "Follow relationship not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to unfollow user" });
+    }
+  });
+
+  app.get("/api/users/:userId/followers", async (req, res) => {
+    try {
+      const followers = await storage.getFollowers(req.params.userId);
+      res.json(followers);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch followers" });
+    }
+  });
+
+  app.get("/api/users/:userId/following", async (req, res) => {
+    try {
+      const following = await storage.getFollowing(req.params.userId);
+      res.json(following);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch following" });
+    }
+  });
+
+  app.get("/api/users/:userId/follow-stats", async (req, res) => {
+    try {
+      const stats = await storage.getFollowStats(req.params.userId);
+      res.json(stats);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch follow stats" });
+    }
+  });
+
+  app.get("/api/users/:followerId/is-following/:followingId", async (req, res) => {
+    try {
+      const isFollowing = await storage.isFollowing(req.params.followerId, req.params.followingId);
+      res.json({ isFollowing });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to check follow status" });
+    }
+  });
+
+  // ========== LIKE ROUTES ==========
+  app.post("/api/photos/:photoId/like", async (req, res) => {
+    try {
+      const result = likePhotoSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: result.error.errors[0].message });
+      }
+
+      const like = await storage.likePhoto(result.data.userId, req.params.photoId);
+      res.json(like);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to like photo" });
+    }
+  });
+
+  app.delete("/api/photos/:photoId/like/:userId", async (req, res) => {
+    try {
+      const success = await storage.unlikePhoto(req.params.userId, req.params.photoId);
+      if (!success) {
+        return res.status(404).json({ error: "Like not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to unlike photo" });
+    }
+  });
+
+  app.get("/api/photos/:photoId/likes", async (req, res) => {
+    try {
+      const likes = await storage.getPhotoLikes(req.params.photoId);
+      res.json(likes);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch likes" });
+    }
+  });
+
+  app.get("/api/photos/:photoId/likes/count", async (req, res) => {
+    try {
+      const count = await storage.getPhotoLikeCount(req.params.photoId);
+      res.json({ count });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch like count" });
+    }
+  });
+
+  app.get("/api/photos/:photoId/liked-by/:userId", async (req, res) => {
+    try {
+      const isLiked = await storage.isPhotoLikedByUser(req.params.photoId, req.params.userId);
+      res.json({ isLiked });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to check like status" });
+    }
+  });
+
+  app.get("/api/users/:userId/likes", async (req, res) => {
+    try {
+      const likes = await storage.getUserLikes(req.params.userId);
+      res.json(likes);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch user likes" });
+    }
+  });
+
+  // ========== BOOKMARK ROUTES (DISHES) ==========
+  app.post("/api/users/:userId/bookmarks/dishes", async (req, res) => {
+    try {
+      const result = bookmarkDishSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: result.error.errors[0].message });
+      }
+
+      const bookmark = await storage.bookmarkDish(req.params.userId, result.data.dishId);
+      res.json(bookmark);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to bookmark dish" });
+    }
+  });
+
+  app.delete("/api/users/:userId/bookmarks/dishes/:dishId", async (req, res) => {
+    try {
+      const success = await storage.unbookmarkDish(req.params.userId, req.params.dishId);
+      if (!success) {
+        return res.status(404).json({ error: "Bookmark not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to remove bookmark" });
+    }
+  });
+
+  app.get("/api/users/:userId/bookmarks/dishes", async (req, res) => {
+    try {
+      const bookmarks = await storage.getUserDishBookmarks(req.params.userId);
+      res.json(bookmarks);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch dish bookmarks" });
+    }
+  });
+
+  app.get("/api/users/:userId/bookmarks/dishes/:dishId/status", async (req, res) => {
+    try {
+      const isBookmarked = await storage.isDishBookmarked(req.params.userId, req.params.dishId);
+      res.json({ isBookmarked });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to check bookmark status" });
+    }
+  });
+
+  // ========== BOOKMARK ROUTES (RESTAURANTS) ==========
+  app.post("/api/users/:userId/bookmarks/restaurants", async (req, res) => {
+    try {
+      const result = bookmarkRestaurantSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: result.error.errors[0].message });
+      }
+
+      const bookmark = await storage.bookmarkRestaurant(req.params.userId, result.data.restaurantId);
+      res.json(bookmark);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to bookmark restaurant" });
+    }
+  });
+
+  app.delete("/api/users/:userId/bookmarks/restaurants/:restaurantId", async (req, res) => {
+    try {
+      const success = await storage.unbookmarkRestaurant(req.params.userId, req.params.restaurantId);
+      if (!success) {
+        return res.status(404).json({ error: "Bookmark not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to remove bookmark" });
+    }
+  });
+
+  app.get("/api/users/:userId/bookmarks/restaurants", async (req, res) => {
+    try {
+      const bookmarks = await storage.getUserRestaurantBookmarks(req.params.userId);
+      res.json(bookmarks);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch restaurant bookmarks" });
+    }
+  });
+
+  app.get("/api/users/:userId/bookmarks/restaurants/:restaurantId/status", async (req, res) => {
+    try {
+      const isBookmarked = await storage.isRestaurantBookmarked(req.params.userId, req.params.restaurantId);
+      res.json({ isBookmarked });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to check bookmark status" });
+    }
+  });
+
+  // ========== SHARE ROUTES ==========
+  app.post("/api/shares", async (req, res) => {
+    try {
+      const result = createShareSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: result.error.errors[0].message });
+      }
+
+      const share = await storage.createShare(result.data);
+      res.json(share);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create share" });
+    }
+  });
+
+  app.get("/api/users/:userId/inbox", async (req, res) => {
+    try {
+      const unreadOnly = req.query.unreadOnly === "true";
+      const shares = await storage.getUserInbox(req.params.userId, unreadOnly);
+      res.json(shares);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch inbox" });
+    }
+  });
+
+  app.patch("/api/shares/:id/read", async (req, res) => {
+    try {
+      const share = await storage.markShareAsRead(req.params.id);
+      if (!share) {
+        return res.status(404).json({ error: "Share not found" });
+      }
+      res.json(share);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to mark share as read" });
+    }
+  });
+
+  app.delete("/api/shares/:id", async (req, res) => {
+    try {
+      const success = await storage.deleteShare(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Share not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete share" });
+    }
+  });
+
+  app.get("/api/shares/:id", async (req, res) => {
+    try {
+      const share = await storage.getShareById(req.params.id);
+      if (!share) {
+        return res.status(404).json({ error: "Share not found" });
+      }
+      res.json(share);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch share" });
+    }
+  });
+
+  // ========== AGGREGATION & SPECIAL FEATURE ROUTES ==========
+  app.get("/api/restaurants/:id/dishes", async (req, res) => {
+    try {
+      const restaurantWithDishes = await storage.getRestaurantWithDishes(req.params.id);
+      if (!restaurantWithDishes) {
+        return res.status(404).json({ error: "Restaurant not found" });
+      }
+      res.json(restaurantWithDishes);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch restaurant dishes" });
+    }
+  });
+
+  app.get("/api/dishes/:dishId/photos", async (req, res) => {
+    try {
+      const photos = await storage.getDishPhotosWithDetails(req.params.dishId);
+      res.json(photos);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch dish photos" });
+    }
+  });
+
+  app.get("/api/users/:userId/profile-stats", async (req, res) => {
+    try {
+      const stats = await storage.getUserProfileStats(req.params.userId);
+      res.json(stats);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch profile stats" });
+    }
+  });
+
+  app.get("/api/users/:userId/feed", async (req, res) => {
+    try {
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 20;
+      const offset = req.query.offset ? parseInt(req.query.offset as string) : 0;
+      const photos = await storage.getFeedPhotos(req.params.userId, limit, offset);
+      res.json(photos);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch feed" });
+    }
+  });
+
+  // ========== SEARCH ROUTES ==========
+  app.get("/api/search/users", async (req, res) => {
+    try {
+      const query = req.query.q as string;
+      if (!query) {
+        return res.status(400).json({ error: "Query parameter 'q' is required" });
+      }
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 20;
+      const users = await storage.searchUsers(query, limit);
+      res.json(users);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to search users" });
+    }
+  });
+
+  app.get("/api/search/dishes", async (req, res) => {
+    try {
+      const query = req.query.q as string;
+      if (!query) {
+        return res.status(400).json({ error: "Query parameter 'q' is required" });
+      }
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 20;
+      const dishes = await storage.searchDishes(query, limit);
+      res.json(dishes);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to search dishes" });
+    }
+  });
+
+  app.get("/api/search/restaurants", async (req, res) => {
+    try {
+      const query = req.query.q as string;
+      if (!query) {
+        return res.status(400).json({ error: "Query parameter 'q' is required" });
+      }
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 20;
+      const restaurants = await storage.searchRestaurants(query, limit);
+      res.json(restaurants);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to search restaurants" });
     }
   });
 
